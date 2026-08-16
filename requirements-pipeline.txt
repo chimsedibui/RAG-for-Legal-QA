@@ -1,0 +1,2 @@
+bs4==0.0.2
+python-slugify==8.0.4

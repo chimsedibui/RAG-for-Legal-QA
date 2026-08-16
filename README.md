@@ -1,0 +1,665 @@
+<div align="center">
+
+# ⚖️ Legal RAG Chatbot — Vietnamese Legal Q&A API
+
+**RAG (Retrieval-Augmented Generation) chatbot API cho lĩnh vực pháp luật Việt Nam**, hỗ trợ hội thoại nhiều lượt (multi-turn) và streaming theo thời gian thực từng bước xử lý của pipeline: *phân tích câu hỏi → tìm kiếm tài liệu → tra cứu chéo văn bản → sinh câu trả lời có trích dẫn*.
+
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.138-009688)](https://fastapi.tiangolo.com/)
+[![FAISS](https://img.shields.io/badge/Vector%20Search-FAISS-yellow)](https://github.com/facebookresearch/faiss)
+[![License](https://img.shields.io/badge/license-MIT-lightgrey)](#giấy-phép)
+
+[Demo](#demo) · [Kiến trúc](#kiến-trúc-pipeline) · [Cài đặt](#cài-đặt) · [API](#api-endpoints) · [Kết quả thi đấu](#kết-quả-trên-bảng-xếp-hạng)
+
+</div>
+
+---
+
+## Demo
+
+https://github.com/user-attachments/assets/dccc32c0-e9b4-414a-aecb-b64a7bd6383b
+
+## Giới thiệu
+
+Dự án cung cấp một **API chatbot hỏi đáp pháp luật Việt Nam**, xây dựng trên kiến trúc RAG (Retrieval-Augmented Generation) với:
+
+- **Sub-query decomposition** — tách câu hỏi phức hợp thành các truy vấn con đầy đủ ngữ cảnh trước khi tìm kiếm.
+- **Semantic search** trên FAISS, kết hợp reranking (tùy chọn) để tăng độ chính xác.
+- **Tra cứu chéo văn bản theo yêu cầu (tool-calling)** — LLM tự gọi tool để lấy thêm nội dung từ một văn bản/Điều/Khoản cụ thể khi cần.
+- **Streaming SSE** — trả kết quả theo từng bước xử lý (sub-query, retrieval, context, tool-call, answer) thay vì đợi toàn bộ pipeline chạy xong.
+- **Trích dẫn nguồn** — mọi câu trả lời đều đi kèm citation `[N]` trỏ về đúng Điều/Khoản/văn bản pháp luật gốc.
+
+Dự án được phát triển trong khuôn khổ cuộc thi **[R2AI 2026 — Build AI Legal Assistant](https://leaderboard.aiguru.com.vn/competitions/13/)**, tổ chức bởi BM25 Baseline / AI Guru.
+
+## Kết quả trên bảng xếp hạng
+
+Trích từ leaderboard chính thức của BTC (hạng mục **Kiểm thử riêng**, top 10 tại thời điểm chốt), dùng để đối chiếu vị trí và các chỉ số của đội **Bee IT** so với các đội dẫn đầu khác.
+
+| # | Người tham gia | Ngày | ID | FINAL SCORE | Articles F2-Macro | Docs F2-Macro | Avg QA | Articles Precision | Articles Recall | Docs Precision | Docs Recall | Chính xác nội dung | Đầy đủ & toàn diện | Thực tiễn & áp dụng | Rõ ràng & dễ hiểu |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | Hung&Fong | 2026-07-02 22:21 | 2210 | **0.6437** | **0.6552** | **0.763** | 0.513 | 0.5654 | 0.722 | 0.6856 | 0.8184 | 0.3836 | 0.3739 | 0.3581 | 0.9366 |
+| 2 | Trần Anh Tú | 2026-07-02 17:51 | 2198 | 0.6408 | 0.6117 | 0.7076 | 0.6029 | 0.4548 | 0.7202 | 0.5371 | 0.8217 | 0.4883 | 0.4368 | 0.5166 | 0.9701 |
+| 3 | thanhkhauson | 2026-07-02 21:30 | 2204 | 0.6299 | 0.5774 | 0.6062 | **0.7062** | 0.4724 | 0.6629 | 0.4598 | 0.7152 | **0.5886** | **0.543** | **0.7248** | 0.9685 |
+| 4 | mscai | 2026-07-02 22:39 | 2212 | 0.6291 | 0.5733 | 0.734 | 0.5799 | 0.5561 | 0.6317 | **0.6944** | 0.7825 | 0.5082 | 0.3812 | 0.4573 | **0.9727** |
+| **5** | **Bee IT** | 2026-07-01 13:14 | 2155 | 0.6053 | 0.5612 | 0.6737 | 0.581 | 0.3443 | **0.7694** | 0.4795 | **0.8465** | 0.5517 | 0.4681 | 0.3397 | 0.9643 |
+| 6 | Nguyễn Văn Nghiêm | 2026-07-01 09:49 | 2144 | 0.5983 | 0.6008 | 0.6759 | 0.5182 | 0.5473 | 0.6639 | 0.5782 | 0.7573 | 0.437 | 0.4044 | 0.2586 | **0.9727** |
+| 7 | Next Gen 2026 | 2026-07-01 22:46 | 2162 | 0.554 | 0.54 | 0.6656 | 0.4565 | 0.4989 | 0.5826 | 0.5639 | 0.7287 | 0.4124 | 0.2868 | 0.2444 | 0.8823 |
+| 8 | Agentic Builders Lê Trí Luận | 2026-07-02 19:37 | 2200 | 0.5391 | 0.5065 | 0.6679 | 0.4428 | **0.5721** | 0.5268 | 0.6887 | 0.6841 | 0.4001 | 0.2693 | 0.227 | 0.875 |
+| 9 | FAI Team | 2026-07-02 17:24 | 2195 | 0.5211 | 0.5547 | 0.5333 | 0.4752 | 0.5279 | 0.6069 | 0.4729 | 0.5837 | 0.3921 | 0.2981 | 0.3004 | 0.9103 |
+| 10 | tqd | 2026-07-01 11:55 | 2150 | 0.5182 | 0.51 | 0.5921 | 0.4524 | 0.5617 | 0.521 | 0.6358 | 0.5981 | 0.4203 | 0.3109 | 0.1998 | 0.8789 |
+
+> Đội **Bee IT** (dự án này) xếp **hạng 5/54** ở thời điểm chốt bảng trên, với `FINAL SCORE = 0.6053`. Điểm mạnh nằm ở **Docs Recall (0.8465)** và **Articles Recall (0.7694)**.
+
+## Cấu trúc dự án
+
+Kiến trúc chia theo hướng **interface-first** để dễ mở rộng: `core/` định nghĩa các "hợp đồng" (Protocol) mà mọi provider phải tuân theo, `providers/` là các cài đặt cụ thể (OpenAI-compatible LLM/embedding/rerank, FAISS), `tools/` là registry cho tool-calling, còn `services/` chỉ còn logic nghiệp vụ thuần túy (retrieval, orchestration) — không còn phụ thuộc trực tiếp vào bất kỳ SDK/thư viện cụ thể nào.
+
+```
+project/
+├── main.py                     # Entry point chạy server (uvicorn)
+├── core/
+│   ├── config.py                # Settings tập trung (pydantic-settings) — nguồn duy nhất đọc biến môi trường
+│   ├── interfaces.py             # Protocol: LLMProvider, EmbeddingProvider, Reranker, VectorStore, Tool
+│   ├── models.py                 # EventStep/EventStatus + Chunk/ChunkMetadata (schema dùng chung pipeline ↔ services)
+│   └── prompts.py                 # System prompt, sub-query prompt, helper with_no_think()
+├── providers/                   # Cài đặt cụ thể cho từng interface — thêm provider mới = thêm 1 file ở đây
+│   ├── openai_llm.py              # OpenAILLMProvider — bất kỳ endpoint chat nào tương thích OpenAI
+│   ├── openai_embedding.py         # OpenAIEmbeddingProvider
+│   ├── reranker.py                  # VLLMReranker (vLLM /rerank) + NullReranker (không cấu hình rerank)
+│   └── faiss_store.py                # FaissVectorStore — vector store; đổi sang Qdrant/Milvus chỉ cần 1 file mới cùng interface
+├── tools/                        # Tool-calling registry — thêm tool mới = thêm 1 file + 1 dòng register()
+│   ├── registry.py
+│   └── doc_ref_tool.py             # search_referenced_document
+├── services/
+│   ├── search.py                   # SemanticSearchService + DocRefSearchService (retrieval, không đụng FAISS/SDK trực tiếp)
+│   └── rag_pipeline.py               # RAGPipeline — orchestration thuần: sub-query → retrieval → context_ready → tool-call → answer
+├── api/
+│   ├── app.py                      # FastAPI app + composition root (nơi duy nhất wire provider cụ thể vào pipeline)
+│   └── templates/index.html         # Giao diện chatbot web (vanilla JS + SSE + sidebar tài liệu)
+├── pipeline/
+│   ├── crawl_preprocess.py         # Phase 1-2: crawl dữ liệu VBPL + lọc/chuẩn hóa
+│   └── chunk_embedding.py           # Phase 3-4: chunking theo Điều/Khoản + embedding FAISS (dùng chung OpenAIEmbeddingProvider)
+├── tests/                        # pytest — chạy hoàn toàn offline (fakes, không cần FAISS index thật/mạng)
+├── data/                        # FAISS index và các map dữ liệu (tải riêng, xem mục Cài đặt)
+│   ├── faiss.index
+│   ├── faiss_id_map.json
+│   ├── chunk_map.json
+│   ├── article_index_map.json
+│   └── chunks.json
+├── requirements.txt              # Dependency chạy API
+├── requirements-pipeline.txt      # Dependency riêng cho pipeline/ (bs4, python-slugify)
+├── requirements-dev.txt           # Dependency chạy test (pytest)
+├── .env.example                  # Mẫu file cấu hình biến môi trường
+└── README.md                     # Tài liệu này
+```
+
+## Pipeline xử lý dữ liệu (Crawl → Chunk → Embedding)
+
+![Pipeline xử lí dữ liệu (Crawl -> Chunk -> Embedding)](images/crawl_preprocess.png)
+
+### Quy trình tổng quan
+
+Dữ liệu được xử lý qua 4 phase liên tiếp: crawl từ API → lọc và chuẩn hóa → chia chunk theo cấu trúc pháp luật → embedding với FAISS.
+
+```
+Dữ liệu VBPL API
+    │
+    ▼
+[PHASE 1: CRAWL]
+    └─► Fetch dữ liệu từ https://vbpl-bientap-gateway.moj.gov.vn/api/qtdc/public/doc/all
+    └─► Lấy detail + HTML content (documentContent.content) từ từng doc
+    └─► Lấy metadata cấu trúc (Điều/Khoản/Điểm) từ index API
+    └─► Lưu: data.jsonl + index_data.jsonl (hỗ trợ resume với checkpoint.json)
+    │
+    ▼
+[PHASE 2: PREPROCESS]
+    └─► Đọc data.jsonl + index_data.jsonl
+    └─► Lọc docs:
+         * effStatus phải là: "Còn hiệu lực", "Hết hiệu lực một phần", "Chưa có hiệu lực"
+         * Loại bỏ: "Hết hiệu lực toàn bộ", "Không còn phù hợp", "Ngưng hiệu lực"
+         * Phải có index metadata
+    └─► Merge dữ liệu cleaned + metadata → processed_data.json
+    └─► Output: error_items.json (lý do lọc)
+    │
+    ▼
+[PHASE 3: CHUNKING]
+    └─► Parse HTML content từ processed_data.json bằng BeautifulSoup
+    └─► Tách theo cấu trúc pháp luật: Phần → Chương → Điều → Khoản → Điểm
+    └─► Mỗi leaf node (Điều/Khoản/Điểm) = 1 chunk
+    └─► Tạo embed_text: [Tên văn bản] - [Số Điều] - [Hierarchy] : [Nội dung]
+    └─► Lưu:
+         * chunks.json: danh sách tất cả chunks + metadata + embed_text
+         * faiss_id_map.json: map FAISS index ID → chunk ID
+         * chunk_map.json: chunk ID → metadata
+         * doc_index_map.json: doc ID → danh sách chunk IDs
+         * article_index_map.json: doc ID + Điều số → danh sách chunk IDs
+    │
+    ▼
+[PHASE 4: EMBEDDING]
+    └─► Embed mỗi chunk.embed_text bằng Qwen3-Embedding-0.6B
+    └─► Build FAISS IndexIDMap (inner product, dimension=1024)
+    └─► Lưu: faiss.index + indexed_ids.json (hỗ trợ resume)
+    │
+    ▼
+Ready cho RAG Pipeline (semantic search)
+```
+
+### Chi tiết các Phase
+
+#### Phase 1: Crawl (`pipeline/crawl_preprocess.py`)
+
+```bash
+python pipeline/crawl_preprocess.py
+```
+
+- Crawl **36,916 trang** từ VBPL API (10 docs/trang)
+- Mỗi doc lấy:
+  - **Detail API** (`/api/qtdc/public/doc/{doc_id}`): docNum, title, effStatus, effFrom, documentContent.content (HTML)
+  - **Index API** (qua form POST tới vbpl.vn): metadata cấu trúc pháp luật (tree của các node Phần/Chương/Điều/Khoản/Điểm)
+- **Checkpoint**: lưu lại trang cuối cùng xử lý thành công → có thể resume lại nếu gián đoạn
+- **Output**:
+  - `data.jsonl`: 1 dòng = 1 doc (JSON object)
+  - `index_data.jsonl`: 1 dòng = {doc_id, index_data}
+  - `checkpoint.json`: {last_page, failed_docs}
+
+#### Phase 2: Preprocess (`pipeline/crawl_preprocess.py phase2`)
+
+```bash
+python pipeline/crawl_preprocess.py phase2
+```
+
+- Đọc data.jsonl + index_data.jsonl
+- **Lọc effStatus**:
+  - ✅ GIỮ: `"Còn hiệu lực"` (Still in effect), `"Hết hiệu lực một phần"` (Partially expired), `"Chưa có hiệu lực"` (Not yet in effect)
+  - ❌ LOẠI: `"Hết hiệu lực toàn bộ"` (Fully expired), `"Không còn phù hợp"` (No longer applicable), `"Ngưng hiệu lực"` (Suspended)
+- **Merge**: kết hợp detail + metadata → 1 doc object hoàn chỉnh
+- **Output**:
+  - `processed_data.json`: dữ liệu được chấp nhận (JSON array)
+  - `error_items.json`: dữ liệu bị lọc (kèm lý do: missing_effStatus, no_index_metadata, unsupported_effStatus, v.v.)
+
+#### Phase 3: Chunking (`pipeline/chunk_embedding.py phase3`)
+
+```bash
+python pipeline/chunk_embedding.py phase3
+```
+
+- Parse HTML từ `processed_data.json` bằng BeautifulSoup
+- Xây dựng **tree map** từ metadata index, flatten thành dict `id → node_info`
+- Duyệt tất cả **leaf nodes** (các node không có children hoặc được đánh dấu `isLeaf=true`):
+  - Mỗi leaf = 1 chunk
+  - Lấy **nội dung text** từ HTML element tương ứng
+  - Tạo **hierarchy string**: danh sách tiêu đề từ root tới node hiện tại (bỏ qua Part/Chapter)
+  - Tạo **embed_text**: `[Tên văn bản] - [Số Điều] - [Hierarchy] : [Nội dung]`
+  - Metadata: title, doc_num, doc_id, article (số Điều), clause (khoản nếu có)
+- **Deduplication**: không lưu lại doc lỗi (missing content, metadata)
+- **Output**:
+  - `data/chunks.json`: danh sách tất cả chunks
+  - `data/faiss_id_map.json`: FAISS index → chunk_id
+  - `data/chunk_map.json`: chunk_id → metadata
+  - `data/doc_index_map.json`: doc_id → [chunk indices]
+  - `data/article_index_map.json`: doc_id|article → [chunk indices] (cho tool `search_referenced_document`)
+  - `data/skipped.json`: danh sách docs bị skip (lý do lỗi)
+
+#### Phase 4: Embedding (`pipeline/chunk_embedding.py phase4`)
+
+```bash
+python pipeline/chunk_embedding.py phase4
+```
+
+- Load chunks từ `data/chunks.json`
+- Khởi tạo hoặc resume **FAISS IndexIDMap** (Inner Product, 1024 dimensions)
+- **Embed batch** từng chunk.embed_text:
+  - Gọi embedding API (Qwen3-Embedding-0.6B) với batch size=5
+  - Normalize vectors (L2 norm)
+  - Thêm vào FAISS index với ID = chunk index
+- **Resume capability**: lưu indexed_ids.json → có thể chạy lại nếu gián đoạn
+- **Flush**: lưu FAISS index + indexed_ids mỗi 500 vectors
+- **Output**:
+  - `data/faiss.index`: FAISS binary index (phục vụ semantic search)
+  - `data/indexed_ids.json`: danh sách ID đã embed (dùng resume)
+
+### Chạy toàn bộ pipeline
+
+```bash
+# Chạy toàn bộ 4 phase tuần tự
+python pipeline/crawl_preprocess.py        # Phase 1 + 2
+python pipeline/chunk_embedding.py         # Phase 3 + 4
+
+# Hoặc chạy riêng từng phase
+python pipeline/crawl_preprocess.py phase2   # Chỉ preprocess (đã có data.jsonl)
+python pipeline/chunk_embedding.py phase3    # Chỉ chunking
+python pipeline/chunk_embedding.py phase4    # Chỉ embedding (đã có chunks.json)
+```
+
+### Lưu ý khi xử lý dữ liệu
+
+- **Quy mô dữ liệu**: ~36k docs, ~810k+ chunks, FAISS index ~3.2GB. Khuyến nghị:
+  - SSD/NVMe cho lưu trữ dữ liệu tạm
+  - CPU: ≥8 cores cho parallel processing
+  - RAM: ≥16GB
+  - GPU (tùy chọn): tăng tốc chunking/embedding
+- **Offline processing**: toàn bộ 4 phase có thể chạy offline (sau khi crawl dữ liệu lần đầu)
+- **Incremental update**: nếu muốn cập nhật dữ liệu mới:
+  - Chạy phase 1 từ `checkpoint.json` (nếu cần)
+  - Hoặc chỉ crawl phần mới, merge vào processed_data.json trước phase 3
+
+## Kiến trúc pipeline
+
+Khác với cách xử lý 2 lượt gọi LLM tách rời (1 lần quyết định tool call, 1 lần sinh câu trả lời), `RAGPipeline` gộp bước quyết định tool-call và sinh câu trả lời vào **một luồng streaming duy nhất**: LLM vừa có thể trả lời trực tiếp (`delta.content`) vừa có thể gọi tool (`delta.tool_calls`) ngay trong cùng 1 lần gọi API, giảm độ trễ và giữ nguyên ngữ cảnh hội thoại giữa các bước.
+
+```
+Hội thoại (messages: [user, assistant, user, ...])
+  │
+  ▼
+[Bước 1] Sub-query
+  └─► Gộp toàn bộ hội thoại thành 1 khối text
+  └─► LLM (non-stream, structured output, /no_think) tách câu hỏi thành các sub-query
+      * Mỗi sub-query PHẢI tự đầy đủ ngữ cảnh (giữ nguyên chủ thể/điều kiện của câu hỏi gốc)
+      * Nếu các ý không thể tách rời mà không mất nghĩa → trả về đúng 1 sub-query
+  │
+  ▼
+[Bước 2] Retrieval
+  └─► Semantic search (FAISS) cho từng sub-query
+  └─► Deduplicate theo chunk_id, giới hạn MAX_CONTEXT_CHUNKS
+  │
+  ▼
+[Bước 2.5] Context Ready
+  └─► Phát ngay citation_map + danh sách context_docs vừa retrieval được
+  └─► Cho phép frontend hiển thị sidebar "Tài liệu tham khảo" TRƯỚC khi LLM bắt đầu sinh câu trả lời
+  │
+  ▼
+[Bước 3+4] Answer (streaming, gộp làm 1 lần gọi LLM, /no_think trên mọi user message)
+  └─► Đưa [system prompt, context + quy tắc trích dẫn, ...toàn bộ hội thoại gốc] vào LLM (stream=True)
+  └─► Nếu LLM sinh nội dung (delta.content) → stream trực tiếp ra client
+  └─► Nếu LLM gọi tool `search_referenced_document` (delta.tool_calls)
+        → tra cứu thêm chunk theo doc_ref/điều/khoản cụ thể
+        → cập nhật lại context, phát lại "context_ready" với citation_map mới
+        → gọi lại LLM (tối đa MAX_TOOL_ITERATIONS lần)
+  │
+  ▼
+Trả về: câu trả lời kèm citation [N] + citation_map (map số thứ tự → chunk nguồn)
+```
+
+![Pipeline xử lí câu hỏi](images/pipeline_answer.png)
+
+Toàn bộ các lệnh gọi LLM trong bước 3+4 chạy nối tiếp trong **cùng một danh sách `messages`** (đúng chuẩn tool-calling của OpenAI: `assistant` message chứa `tool_calls` → `tool` message chứa kết quả) để LLM giữ được ngữ cảnh xuyên suốt qua các vòng tra cứu.
+
+### `/no_think` — tắt chế độ suy luận (thinking) của model
+
+Các model dòng Qwen3 chạy qua LM Studio/llama.cpp hỗ trợ chế độ "thinking" (sinh ra khối suy luận trước khi trả lời), có thể bật/tắt bằng hậu tố đặc biệt trong prompt. Pipeline tự động thêm `/no_think` vào cuối content của **mọi message có `role="user"`** trước khi gửi lên LLM (áp dụng cho cả bước sub-query lẫn bước sinh câu trả lời chính), thông qua helper `with_no_think()` (`core/prompts.py`):
+
+- Không sửa đổi message gốc trong lịch sử hội thoại (`llm_messages`) — chỉ áp dụng lên bản sao dùng để gọi API, tránh `/no_think` bị lặp lại nhiều lần qua các vòng lặp tool-call.
+- Tự kiểm tra để không thêm trùng nếu content đã kết thúc sẵn bằng `/no_think`.
+- Không áp dụng cho `system`, `assistant`, `tool` messages.
+
+Mục đích: giảm độ trễ và tránh model sinh ra khối suy luận dài dòng không cần thiết trong một pipeline vốn đã nhiều bước tuần tự (sub-query → retrieval → tool-call → answer).
+
+## Cài đặt
+
+### 1. Clone và cài dependencies
+
+```bash
+git clone https://github.com/antrc2/R2AI2026-BUILD-AI-LEGAL-ASSISTANT
+cd R2AI2026-BUILD-AI-LEGAL-ASSISTANT
+
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+
+pip install -r requirements.txt              # Chạy API
+pip install -r requirements-pipeline.txt      # (Tùy chọn) chạy pipeline/crawl_preprocess.py, chunk_embedding.py
+pip install -r requirements-dev.txt           # (Tùy chọn) chạy test: pytest tests/
+```
+
+### 2. Yêu cầu hệ thống
+
+- Python 3.10+
+- Các service bên ngoài tương thích **OpenAI API**:
+  - **Chat LLM** — hỗ trợ streaming + function calling (khuyến nghị dòng Qwen3 để tương thích `/no_think`)
+  - **Embedding model**
+  - **Reranker** (tùy chọn — nếu không cấu hình, `NullReranker` giữ nguyên thứ tự kết quả semantic search)
+
+### 3. Tải dữ liệu (thư mục `data/`)
+
+Repo **không** chứa sẵn thư mục `data/` (FAISS index, chunks, metadata). Tải archive đã đóng gói từ Hugging Face và giải nén vào thư mục gốc của project.
+
+**Linux / macOS:**
+
+```bash
+curl -L https://huggingface.co/AnTrc2/R2AI2026-BUILD-AI-LEGAL-ASSISTANT/resolve/main/data.zip -o data.zip
+unzip -o data.zip -d .
+```
+
+**Windows PowerShell:**
+
+```powershell
+Invoke-WebRequest -Uri "https://huggingface.co/AnTrc2/R2AI2026-BUILD-AI-LEGAL-ASSISTANT/resolve/main/data.zip" -OutFile "data.zip"
+Expand-Archive -Path ".\data.zip" -DestinationPath "." -Force
+```
+
+Kiểm tra sau khi giải nén — cần thấy đủ 4 file: `faiss.index`, `faiss_id_map.json`, `chunk_map.json`, `article_index_map.json` (và `chunks.json` nếu muốn dùng `embed_text` gốc thay vì rebuild từ metadata).
+
+```bash
+ls data
+# hoặc Windows:
+Get-ChildItem .\data
+```
+
+**Nguồn dữ liệu:** kho ngữ liệu được crawl và xử lý từ văn bản pháp luật Việt Nam (luật, nghị định, thông tư...), được chunk theo cấu trúc Điều/Khoản/Điểm rồi embed bằng `Qwen3-Embedding-0.6B`. Toàn bộ archive `data.zip` ở trên là dữ liệu đã qua xử lý (post-processing), sẵn sàng nạp trực tiếp vào FAISS.
+
+### 4. Cấu hình biến môi trường
+
+Copy `.env.example` thành `.env` ở thư mục gốc và điền thông tin service:
+
+```env
+# --- Chat model (bắt buộc) ---
+CHAT_MODEL_NAME=qwen3-4b
+CHAT_BASE_URL=http://localhost:1234/v1
+CHAT_API_KEY=none
+
+# --- Embedding model (bắt buộc) ---
+EMBEDDING_MODEL_NAME=text-embedding-qwen3-embedding-0.6b
+EMBEDDING_BASE_URL=http://localhost:1234/v1
+EMBEDDING_API_KEY=none
+
+# --- Reranker (tùy chọn, để trống nếu không dùng) ---
+RERANK_MODEL_NAME=
+RERANK_BASE_URL=
+RERANK_API_KEY=
+```
+
+> Cấu hình được load tập trung qua `core/config.py` (`Settings`, dùng `pydantic-settings`). 6 biến `CHAT_*`/`EMBEDDING_*` là **bắt buộc** — thiếu biến nào, server sẽ báo lỗi rõ ràng ngay khi khởi động thay vì âm thầm dùng giá trị mặc định sai. Nếu để trống 1 trong 3 biến `RERANK_*`, pipeline sẽ dùng `NullReranker` và tự động giữ nguyên thứ tự tài liệu từ semantic search thay vì rerank.
+>
+> Các tham số vận hành khác (đều có giá trị mặc định, không bắt buộc set): `DATA_DIR` (mặc định `data`), `RETRIEVAL_THRESHOLD` (`0.5`), `SEMANTIC_TOP_K` (`10`), `TOOL_SEARCH_TOP_K` (`5`), `MAX_CONTEXT_CHUNKS` (`50`), `MAX_TOOL_ITERATIONS` (`3`), `PORT` (`8000`).
+
+### 5. Tự host model (tùy chọn) — llama.cpp / vLLM
+
+Nếu chưa có sẵn service LLM/embedding tương thích OpenAI, có thể tự host bằng `llama-server` (llama.cpp):
+
+```bash
+# Chat model
+./llama-server \
+  -m /path/to/model-chat.gguf \
+  --host 0.0.0.0 --port 1234 \
+  --ctx-size 32768 \
+  --n-gpu-layers 999
+```
+
+```bash
+# Embedding model (cổng riêng, thêm cờ --embedding)
+./llama-server \
+  -m /path/to/model-embedding.gguf \
+  --host 0.0.0.0 --port 1235 \
+  --embedding --ctx-size 4096
+```
+
+Reranker (tùy chọn) có thể host bằng vLLM, ví dụ với `Qwen3-Reranker-0.6B`:
+
+```bash
+docker run --rm --gpus all \
+  --name reranker \
+  -p 1236:8000 \
+  vllm/vllm-openai:latest \
+  --model Qwen/Qwen3-Reranker-0.6B \
+  --hf-overrides '{"architectures":["Qwen3ForSequenceClassification"],"classifier_from_token":["no","yes"],"is_original_qwen3_reranker":true}' \
+  --dtype float16 --max-model-len 2048 \
+  --gpu-memory-utilization 0.4 --enforce-eager
+```
+
+Sau đó cập nhật `.env` cho khớp cổng/model đang chạy. Kiểm tra nhanh:
+
+```bash
+curl http://localhost:1234/v1/models
+curl http://localhost:1235/v1/models
+```
+
+## Chạy server
+
+```bash
+python main.py
+```
+
+Hoặc chạy trực tiếp bằng uvicorn:
+
+```bash
+uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Server chạy tại `http://localhost:8000`.
+
+## API Endpoints
+
+### 1. `GET /` — Trang chủ chatbot
+
+Trả về giao diện web (`templates/index.html`) để tương tác trực tiếp qua trình duyệt, hiển thị pipeline steps theo thời gian thực và sidebar tài liệu tham khảo.
+
+![Giao diện trang wbe](images/template.png)
+
+
+### 2. `POST /chat` — Endpoint chat chính
+
+**Request:**
+
+```json
+{
+  "messages": [
+    { "role": "user", "content": "Doanh nghiệp nhỏ và vừa được ưu đãi thuế TNDN như thế nào?" },
+    { "role": "assistant", "content": "Theo Luật Hỗ trợ DNNVV..." },
+    { "role": "user", "content": "Vậy còn thuế VAT thì sao?" }
+  ],
+  "stream": true
+}
+```
+
+**Parameters:**
+
+| Field | Kiểu | Bắt buộc | Mô tả |
+|---|---|---|---|
+| `messages` | `List[ChatMessage]` | có | Toàn bộ lịch sử hội thoại, mỗi phần tử `{"role": "user"\|"assistant", "content": "..."}`. Không cần gửi kèm `system` message — pipeline tự thêm. |
+| `stream` | `bool` | không (mặc định `true`) | `true`: trả về Server-Sent Events; `false`: trả JSON một lần khi xử lý xong toàn bộ. |
+
+Client cần tự lưu và gửi lại toàn bộ `messages` ở mỗi lượt gọi (bao gồm cả các câu trả lời `assistant` trước đó) để giữ ngữ cảnh hội thoại nhiều lượt. Frontend đi kèm (`templates/index.html`) luôn gọi với `stream: true`.
+
+**Response khi `stream=true` (Server-Sent Events):**
+
+Mỗi dòng có định dạng `data: {...}\n\n`, kết thúc bằng `data: [DONE]\n\n`. Các event theo đúng thứ tự pipeline:
+
+```json
+{"step": "sub_queries", "status": "processing", "data": null}
+{"step": "sub_queries", "status": "done", "data": {"queries": ["...", "..."]}}
+
+{"step": "retrieval", "status": "processing", "data": null}
+{"step": "retrieval", "status": "done", "data": {"count": 18}}
+
+{"step": "context_ready", "status": "done", "data": {
+  "citations": {"1": {"content": "...", "metadata": {}}, "2": {}},
+  "sources": [{"chunk_id": "...", "content": "...", "metadata": {}}]
+}}
+
+{"step": "tool_call", "status": "processing", "data": null}
+{"step": "answer", "status": "start", "data": null}
+
+{"step": "tool_call", "status": "detected", "data": {"args": {"doc_ref": "04/2017/QH14", "content_query": "ưu đãi thuế VAT"}}}
+{"step": "tool_call", "status": "executed", "data": {"found_count": 4}}
+{"step": "context_ready", "status": "done", "data": {"citations": {"...": {}}, "sources": [{}]}}
+{"step": "tool_call", "status": "done", "data": null}
+
+{"step": "answer", "status": "streaming", "data": {"chunk": "Theo quy định tại", "citations": {"1": {"content": "...", "metadata": {}}, "2": {}}}}
+{"step": "answer", "status": "streaming", "data": {"chunk": " Điều 5 [1]...", "citations": {}}}
+
+{"step": "answer", "status": "done", "data": {
+  "text": "Toàn bộ câu trả lời hoàn chỉnh, có trích dẫn [1], [2]...",
+  "citations": {"1": {"content": "...", "metadata": {}}, "2": {}},
+  "sources": [{"chunk_id": "...", "content": "...", "metadata": {}}]
+}}
+```
+
+Nếu xảy ra lỗi ở bất kỳ bước nào: `{"step": "answer", "status": "error", "data": {"error": "..."}}` (hoặc `{"step": "tool_call", "status": "error", "data": {"error": "..."}}` nếu lỗi xảy ra riêng khi thực thi tool tra cứu chéo văn bản).
+
+> `citations` là map `{"số thứ tự (string)": chunk object}` tương ứng đúng với các số `[N]` xuất hiện trong text câu trả lời — dùng để frontend render tooltip/sidebar tham chiếu nguồn. Event `answer/done` cuối cùng mang đủ cả `text` + `citations` + `sources` (danh sách nguồn cuối cùng, đã gộp cả kết quả từ các vòng tool-call nếu có).
+
+**Response khi `stream=false`:**
+
+```json
+{
+  "steps": [
+    {"step": "sub_queries", "status": "done", "data": {"queries": ["..."]}},
+    {"step": "retrieval", "status": "done", "data": {"count": 18}},
+    {"step": "context_ready", "status": "done", "data": {"citations": {}, "sources": []}},
+    {"step": "tool_call", "status": "executed", "data": {"found_count": 4}},
+    {"step": "answer", "status": "done", "data": {"text": "...", "citations": {}, "sources": []}}
+  ],
+  "final_answer": "Toàn bộ câu trả lời hoàn chỉnh...",
+  "citations": {"1": {}, "2": {}},
+  "sources": [{"chunk_id": "...", "content": "...", "metadata": {}}]
+}
+```
+
+### 3. `GET /health` — Health check
+
+```json
+{ "status": "ok" }
+```
+
+## Giao diện web
+
+Truy cập `http://localhost:8000` để dùng giao diện chat có sẵn (`templates/index.html`):
+
+- **Khung chat** — hiển thị lịch sử hội thoại (frontend tự lưu `messages` và gửi lại đầy đủ mỗi lượt), luôn dùng streaming.
+- **Nhật ký các bước (step log)** — mỗi bước xử lý (`sub_queries`, `retrieval`, `context_ready`, `tool_call`, `answer`) được **append thành 1 dòng riêng**, không ghi đè lên dòng trước đó, để người dùng xem lại được toàn bộ quá trình xử lý kể cả khi có nhiều vòng lặp tool-call. Sau khi câu trả lời hoàn tất, nhật ký được làm mờ (không ẩn hẳn) để vẫn xem lại được.
+- **Sidebar "Tài liệu tham khảo"** — cập nhật ngay khi có event `context_ready` (trước khi LLM trả lời xong), hiển thị danh sách văn bản/điều khoản kèm số hiệu `[N]` tương ứng.
+- **Citation badge** — số trích dẫn `[N]` trong câu trả lời được render thành nút tròn màu vàng đồng; bấm vào sẽ cuộn tới thẻ tài liệu tương ứng trong sidebar.
+- **Nút "Cuộc trò chuyện mới"** — xóa lịch sử hội thoại phía client và reset sidebar.
+
+## Xử lý streaming ở tầng server
+
+`RAGPipeline.process()` là một generator đồng bộ (chứa các lời gọi HTTP blocking tới LLM/search). Để tránh việc các bước xử lý ban đầu (sub-query, retrieval) bị "kẹt" lại và chỉ được đẩy ra client dồn cục cùng lúc với streaming câu trả lời, `app.py` chạy pipeline trong **một thread riêng** (`_run_pipeline_in_thread`), đẩy từng event qua `queue.Queue`, và phía consumer (`async def event_generator`) đọc queue qua `run_in_executor` — nhờ vậy event loop của FastAPI/Uvicorn không bị block, mỗi bước được flush ra SSE ngay khi hoàn thành.
+
+Response SSE cũng được gửi kèm header `Cache-Control: no-cache` và `X-Accel-Buffering: no` để tránh bị buffer nếu sau này triển khai sau reverse proxy (nginx).
+
+## Cấu hình tham số pipeline
+
+Toàn bộ tham số vận hành nằm trong `core/config.py::RetrievalSettings`, có thể override qua biến môi trường (xem mục Cài đặt) — không cần sửa code:
+
+| Biến môi trường | Mặc định | Ý nghĩa |
+|---|---|---|
+| `MAX_CONTEXT_CHUNKS` | `50` | Số chunk tối đa đưa vào context mỗi lượt |
+| `MAX_TOOL_ITERATIONS` | `3` | Số vòng tối đa LLM được gọi lại tool `search_referenced_document` |
+| `SEMANTIC_TOP_K` | `10` | Số kết quả lấy về mỗi sub-query ở bước retrieval ban đầu |
+| `TOOL_SEARCH_TOP_K` | `5` | Số kết quả lấy về mỗi lần gọi tool tra cứu chéo văn bản |
+| `RETRIEVAL_THRESHOLD` | `0.5` | Ngưỡng điểm FAISS tối thiểu để giữ lại 1 candidate trước khi rerank |
+
+## Tool tra cứu chéo văn bản
+ 
+Khi LLM phát hiện ngữ cảnh nhắc tới một văn bản khác (ví dụ "theo Luật X", "hướng dẫn tại Thông tư Y") mà cần chi tiết cụ thể để trả lời chính xác, nó có thể tự gọi tool:
+ 
+```json
+{
+  "name": "search_referenced_document",
+  "arguments": {
+    "doc_ref": "36/2015/QĐ-TTg",
+    "dieu_filter": "Điều 74",
+    "khoan_filter": "Khoản 3",
+    "content_query": "điều kiện áp dụng"
+  }
+}
+```
+ 
+Pipeline gọi `DocRefSearchService.doc_ref_search(...)` (qua `tools/doc_ref_tool.py::SearchReferencedDocumentTool`) để lấy thêm chunk liên quan, cập nhật vào context, phát lại `context_ready` với `citation_map` mới, rồi gọi lại LLM với ngữ cảnh mới — lặp lại tối đa `MAX_TOOL_ITERATIONS` lần trước khi buộc phải tổng hợp câu trả lời cuối cùng.
+
+### Thêm tool mới
+
+Tool-calling được tổ chức qua một registry đơn giản (`tools/registry.py::ToolRegistry`) thay vì hardcode trong `RAGPipeline`. Để thêm 1 tool mới:
+
+1. Tạo 1 class implement interface `Tool` (`core/interfaces.py`): thuộc tính `name`, `schema` (OpenAI function-calling schema) và method `execute(args, *, question) -> list[dict]`.
+2. Đăng ký tool đó trong composition root `api/app.py::build_pipeline()`: `tool_registry.register(YourTool(...))`.
+
+Không cần sửa `services/rag_pipeline.py` — vòng lặp tool-call chỉ tra `tool_registry.get(name)` và gọi `.execute(...)`.
+
+### Định nghĩa tool (function calling schema)
+
+Tool được khai báo theo chuẩn `tools` của OpenAI Chat Completions API (xem `tools/doc_ref_tool.py`) và truyền vào `LLMProvider.chat(..., tools=tool_registry.schemas())`. Mô tả (`description`) của tool và từng tham số được viết rất tường minh để LLM chỉ gọi tool khi thật sự cần thiết, tránh gọi tràn lan làm tăng độ trễ:
+ 
+```python
+# tools/doc_ref_tool.py — schema gắn trên SearchReferencedDocumentTool.schema
+_SCHEMA = {
+    "name": "search_referenced_document",
+    "description": (
+        "Tìm kiếm nội dung cụ thể trong một văn bản pháp luật được trích dẫn. "
+        "Sử dụng KHI VÀ CHỈ KHI ngữ cảnh hiện tại nhắc đến một văn bản khác (vd: Luật X, Thông tư Y) "
+        "và bạn BẮT BUỘC cần chi tiết từ văn bản đó để trả lời chính xác câu hỏi."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "doc_ref": {
+                "type": "string",
+                "description": "Số hiệu văn bản pháp luật ĐẦY ĐỦ (ví dụ: '36/2015/QĐ-TTg'). KHÔNG điền [1], [2].",
+            },
+            "dieu_filter": {
+                "type": "string",
+                "description": "(Tùy chọn) Chỉ ghi số điều, ví dụ 'Điều 74'.",
+            },
+            "khoan_filter": {
+                "type": "string",
+                "description": "(Tùy chọn) Chỉ ghi số khoản, ví dụ 'Khoản 3'.",
+            },
+            "content_query": {
+                "type": "string",
+                "description": "(Bắt buộc) Từ khóa hoặc chủ đề cần tìm trong văn bản đó.",
+            },
+        },
+        "required": ["doc_ref", "content_query"],
+    },
+}
+```
+ 
+**Ghi chú các tham số:**
+ 
+| Tham số | Bắt buộc | Mô tả |
+|---|---|---|
+| `doc_ref` | ✅ | Số hiệu văn bản đầy đủ, ví dụ `36/2015/QĐ-TTg`. LLM được yêu cầu rõ **không** điền số citation `[N]` vào đây — tránh nhầm lẫn giữa số thứ tự trích dẫn hiển thị cho người dùng và số hiệu văn bản thật. |
+| `content_query` | ✅ | Từ khóa/chủ đề cần tìm trong văn bản đó, dùng làm query cho bước semantic ranking trong `doc_ref_search`. |
+| `dieu_filter` | ⛔ tùy chọn | Lọc theo Điều cụ thể, ví dụ `Điều 74`. Được map sang tham số `article_filter` khi gọi `DocRefSearchService.doc_ref_search`. |
+| `khoan_filter` | ⛔ tùy chọn | Lọc theo Khoản cụ thể, ví dụ `Khoản 3`. Được map sang tham số `clause_filter`. |
+ 
+Khi model trả về `delta.tool_calls`, `RAGPipeline` parse JSON arguments rồi tra `tool_registry.get(name)`; với `search_referenced_document`, tool gọi `DocRefSearchService.doc_ref_search(query=content_query, doc_ref=doc_ref, article_filter=dieu_filter, clause_filter=khoan_filter)`, rồi đưa kết quả trở lại `messages` dưới dạng `tool` message trước khi gọi lại LLM.
+ 
+## Lưu ý
+
+- **Ngữ cảnh hội thoại nhiều lượt**: mỗi lượt gọi `/chat`, backend chỉ đính kèm context (tài liệu RAG) tương ứng cho câu hỏi mới nhất — các câu trả lời `assistant` ở lượt trước vẫn nằm trong `messages` nhưng không kèm theo nguồn trích dẫn cũ. Nếu người dùng hỏi tiếp về một trích dẫn `[N]` ở lượt trước, model có thể không còn "nhìn thấy" đúng nguồn đó trừ khi client tự giữ và gửi lại citation map liên quan.
+- **LLM API**: cần hỗ trợ streaming (`stream=True`) và function calling (`tools`) theo chuẩn OpenAI Chat Completions. Nếu model không thuộc dòng Qwen3 (không hỗ trợ hậu tố `/no_think`), chuỗi này sẽ được model coi như văn bản thường và không gây lỗi, nhưng cũng không có tác dụng tắt thinking.
+- **Embedding/Reranker**: cần endpoint tương thích OpenAI; reranker là tùy chọn.
+- **Dữ liệu**: cần chuẩn bị đầy đủ FAISS index và các file map trong `data/` trước khi chạy.
+- **`_extract_doc_num` (trong `services/search.py`)**: regex nhận diện số hiệu văn bản chỉ match phần chữ HOA ở nhóm cuối (`[A-ZĐƯƠ]+`), nên với số hiệu có chữ thường ở cuối (ví dụ `QĐ-TTg`), phần chữ thường bị cắt (`QĐ-TT`). Việc match chunk vẫn đúng nhờ bước fallback fuzzy-match theo `doc_num`/`title`, nhưng đây là điểm cần lưu ý nếu mở rộng thêm định dạng số hiệu văn bản khác.
+
+## Kiểm thử
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest tests/ -v
+```
+
+Toàn bộ test dùng fake/in-memory implementation cho `LLMProvider`/`EmbeddingProvider`/`Reranker`/`VectorStore` (xem `tests/conftest.py`) — không cần tải FAISS index thật (~3.2GB) hay gọi LLM/embedding endpoint qua mạng. `providers/faiss_store.py` được test bằng 1 index FAISS thật nhưng rất nhỏ (dựng ngay trong test), vì `faiss-cpu` vốn đã là dependency runtime.
+
+## Tech stack
+
+| Thành phần | Công nghệ |
+|---|---|
+| Web framework | FastAPI + Uvicorn |
+| Vector search | FAISS (`IndexIDMap`, Inner Product, 1024-dim) |
+| LLM / Embedding / Rerank | Bất kỳ endpoint tương thích OpenAI API (Qwen3 qua llama.cpp/vLLM/LM Studio, ...) |
+| Streaming | Server-Sent Events (SSE) qua `sse-starlette` |
+| Data parsing | BeautifulSoup4 |
+| Templating | Jinja2 |
+
+## Đóng góp
+
+Issue và pull request đều được hoan nghênh. Với các thay đổi lớn, vui lòng mở issue trước để thảo luận hướng tiếp cận.
+
+## Tác giả
+
+Được phát triển bởi **AnTrc2** — team **Bee IT** — trong khuôn khổ cuộc thi [R2AI 2026](https://r2ai.aiguru.com.vn/) — hạng mục xây dựng trợ lý AI hỏi đáp pháp luật Việt Nam.
+
+- Facebook: [facebook.com/antrc2](https://www.facebook.com/antrc2)
+- GitHub: [github.com/antrc2](https://github.com/antrc2)
+- Hugging Face: [huggingface.co/AnTrc2](https://huggingface.co/AnTrc2)
