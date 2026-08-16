@@ -299,8 +299,8 @@ Mục đích: giảm độ trễ và tránh model sinh ra khối suy luận dài
 ### 1. Clone và cài dependencies
 
 ```bash
-git clone https://github.com/antrc2/R2AI2026-BUILD-AI-LEGAL-ASSISTANT
-cd R2AI2026-BUILD-AI-LEGAL-ASSISTANT
+git clone https://github.com/chimsedibui/RAG-for-Legal-QA
+cd RAG-for-Legal-QA
 
 python -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
@@ -652,9 +652,17 @@ Toàn bộ test dùng fake/in-memory implementation cho `LLMProvider`/`Embedding
 | Data parsing | BeautifulSoup4 |
 | Templating | Jinja2 |
 
+## Định hướng phát triển
+
+Các tài liệu roadmap (tăng độ chính xác/cross-validation, khảo sát kỹ thuật chống hallucination, triển khai AWS/GCP) được gom chung trong [docs/](docs/README.md) — tách biệt với tài liệu mô tả hệ thống hiện tại ở README này và [REPORT.md](REPORT.md) (ghi lại đợt refactor kiến trúc gần nhất).
+
 ## Đóng góp
 
 Issue và pull request đều được hoan nghênh. Với các thay đổi lớn, vui lòng mở issue trước để thảo luận hướng tiếp cận.
+
+## Giấy phép
+
+Phát hành theo giấy phép **MIT** — xem toàn văn tại [LICENSE](LICENSE).
 
 ## Tác giả
 
