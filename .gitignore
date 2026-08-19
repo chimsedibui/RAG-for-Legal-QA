@@ -30,3 +30,4 @@ build/
 
 # Test cache
 .pytest_cache/
+OLD_README.md
