@@ -41,7 +41,7 @@ def load_search_data(data: DataSettings) -> Tuple[Dict[str, Any], Dict[str, Any]
 
 
 def _get_chunk_content(chunk_id: str, chunk_map: Dict[str, Any], chunks_text_map: Dict[str, str]) -> str:
-    """Lấy nội dung full của chunk."""
+    """Get the full content of a chunk."""
     if chunk_id in chunks_text_map:
         return chunks_text_map[chunk_id]
 

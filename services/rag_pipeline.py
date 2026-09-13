@@ -36,7 +36,7 @@ class RAGPipeline:
         self.settings = retrieval_settings
 
     def _deduplicate_docs(self, docs: List[Dict]) -> List[Dict]:
-        """Loại bỏ các document trùng lặp dựa trên chunk_id."""
+        """Remove duplicate documents based on chunk_id."""
         seen = set()
         unique_docs = []
         for doc in docs:
@@ -47,17 +47,17 @@ class RAGPipeline:
         return unique_docs
 
     def _get_last_user_question(self, messages: List[Dict[str, str]]) -> str:
-        """Lấy câu hỏi mới nhất của user, dùng để log / fallback."""
+        """Get the user's most recent question, used for logging / fallback."""
         for m in reversed(messages):
             if m.get("role") == "user":
                 return m.get("content", "")
         return ""
 
     def process(self, messages: List[Dict[str, str]], stream: bool = True) -> Generator[Dict[str, Any], None, None]:
-        """Pipeline xử lý chính.
+        """Main processing pipeline.
 
-        messages: lịch sử hội thoại dạng [{"role": "user"/"assistant", "content": "..."}]
-        theo đúng thứ tự thời gian, không cần chứa system prompt (pipeline tự thêm).
+        messages: conversation history as [{"role": "user"/"assistant", "content": "..."}]
+        in chronological order; no need to include a system prompt (the pipeline adds its own).
         """
         conversation = [m for m in messages if m.get("role") in ("user", "assistant") and m.get("content")]
         if not conversation:
@@ -67,7 +67,7 @@ class RAGPipeline:
         question = self._get_last_user_question(conversation)
 
         # ==========================================
-        # BƯỚC 1: SUB-QUERY (Phân tích câu hỏi, dựa trên TOÀN BỘ hội thoại)
+        # STEP 1: SUB-QUERY (analyze the question, based on the WHOLE conversation)
         # ==========================================
         yield {"step": EventStep.SUB_QUERIES, "status": EventStatus.PROCESSING, "data": None}
 
@@ -92,7 +92,7 @@ class RAGPipeline:
         yield {"step": EventStep.SUB_QUERIES, "status": EventStatus.DONE, "data": {"queries": sub_queries}}
 
         # ==========================================
-        # BƯỚC 2: SEARCH (Semantic Search ban đầu)
+        # STEP 2: SEARCH (initial semantic search)
         # ==========================================
         yield {"step": EventStep.RETRIEVAL, "status": EventStatus.PROCESSING, "data": None}
 
@@ -111,18 +111,18 @@ class RAGPipeline:
         citation_map: Dict[str, Any] = {str(i + 1): d for i, d in enumerate(context_docs)}
 
         # ==========================================
-        # BƯỚC 2.5: CONTEXT READY
+        # STEP 2.5: CONTEXT READY
         # ------------------------------------------
-        # Trả ra citations/sources NGAY khi vừa retrieval xong, TRƯỚC khi
-        # LLM bắt đầu trả lời — để sidebar tài liệu tham khảo hiện lên sớm
-        # cho người dùng xem trong lúc chờ LLM sinh câu trả lời.
+        # Emit citations/sources RIGHT AFTER retrieval finishes, BEFORE the
+        # LLM starts answering — so the reference-document sidebar appears
+        # early for the user to see while waiting for the LLM to generate an answer.
         #
-        # QUAN TRỌNG: KHÔNG dùng step="answer", status="done" ở đây, vì đó
-        # là tín hiệu "câu trả lời đã hoàn tất" thật sự ở cuối luồng — nếu
-        # dùng trùng, frontend sẽ tưởng câu trả lời xong ngay từ đầu (trong
-        # khi "text" chưa tồn tại) và có thể tắt luôn UI streaming.
-        # Dùng step riêng "context_ready" để frontend cập nhật sidebar mà
-        # không đụng vào logic xử lý "answer".
+        # IMPORTANT: do NOT use step="answer", status="done" here, since that
+        # is the real "answer is complete" signal at the end of the stream —
+        # reusing it would make the frontend think the answer is done right
+        # from the start (while "text" doesn't exist yet) and could turn off
+        # the streaming UI entirely. Use a separate "context_ready" step so
+        # the frontend can update the sidebar without touching "answer" logic.
         # ==========================================
         yield {
             "step": EventStep.CONTEXT_READY,
@@ -131,12 +131,12 @@ class RAGPipeline:
         }
 
         # ==========================================================
-        # BƯỚC 3+4 (GỘP): LLM STREAM — vừa quyết định tool call vừa
-        # trả lời trực tiếp trong CÙNG một lần gọi, giống code mẫu.
-        # Lặp tối đa max_tool_iterations lần nếu LLM liên tục gọi tool.
+        # STEP 3+4 (COMBINED): LLM STREAM — decides on a tool call and
+        # answers directly in the SAME call, per the reference approach.
+        # Loops up to max_tool_iterations times if the LLM keeps calling tools.
         # ==========================================================
-        # Cấu trúc: [system context+quy tắc trích dẫn, ...toàn bộ hội thoại gốc]
-        # Giữ nguyên multi-turn để LLM hiểu đúng mạch hội thoại, thay vì gộp hết vào 1 user message.
+        # Structure: [system context + citation rules, ...the whole original conversation]
+        # Kept multi-turn so the LLM understands the conversation correctly, instead of flattening it into 1 user message.
         llm_messages = [
             build_context_message(context_docs),
             *conversation,
@@ -148,8 +148,8 @@ class RAGPipeline:
         for iteration in range(self.settings.max_tool_iterations):
             did_tool_call = False
 
-            # Buffer để gom các mảnh tool_call arguments bị chia nhỏ qua nhiều chunk
-            # key = index của tool call trong response (OpenAI có thể trả nhiều tool_calls song song)
+            # Buffer to accumulate tool_call argument fragments split across multiple chunks
+            # key = the tool call's index in the response (OpenAI can return multiple tool_calls in parallel)
             tool_call_buffers: Dict[int, Dict[str, Any]] = {}
 
             try:
@@ -168,14 +168,14 @@ class RAGPipeline:
 
             try:
                 for chunk in response_stream:
-                    # LLMProvider yield {"error": ...} thay vì raise khi có lỗi ở giữa stream
+                    # LLMProvider yields {"error": ...} instead of raising when an error happens mid-stream
                     if isinstance(chunk, dict) and "error" in chunk:
                         raise Exception(chunk["error"])
                     if not getattr(chunk, "choices", None):
                         continue
                     delta = chunk.choices[0].delta
 
-                    # --- Trả lời trực tiếp (không cần tool) ---
+                    # --- Direct answer (no tool needed) ---
                     if getattr(delta, "content", None):
                         piece = delta.content
                         full_answer += piece
@@ -185,7 +185,7 @@ class RAGPipeline:
                             "data": {"chunk": piece, "citations": citation_map},
                         }
 
-                    # --- Tool call (có thể tới theo từng mảnh nhỏ) ---
+                    # --- Tool call (may arrive in small fragments) ---
                     if getattr(delta, "tool_calls", None):
                         did_tool_call = True
                         for tc_delta in delta.tool_calls:
@@ -204,11 +204,11 @@ class RAGPipeline:
                 yield {"step": EventStep.ANSWER, "status": EventStatus.ERROR, "data": {"error": str(e)}}
                 return
 
-            # Nếu vòng này LLM không gọi tool -> đã trả lời xong, thoát loop
+            # If the LLM didn't call a tool this round -> answer is done, exit the loop
             if not did_tool_call:
                 break
 
-            # ---- Xử lý các tool call đã gom được ----
+            # ---- Process the accumulated tool calls ----
             assistant_tool_calls = []
             for idx in sorted(tool_call_buffers.keys()):
                 buf = tool_call_buffers[idx]
@@ -218,13 +218,13 @@ class RAGPipeline:
                     "function": {"name": buf["name"], "arguments": buf["arguments"]},
                 })
 
-            # Thêm assistant message chứa tool_calls vào history (bắt buộc theo chuẩn OpenAI)
+            # Add an assistant message with tool_calls to history (required by the OpenAI spec)
             llm_messages.append({"role": "assistant", "content": None, "tool_calls": assistant_tool_calls})
 
             for tc in assistant_tool_calls:
                 tool = self.tool_registry.get(tc["function"]["name"])
                 if tool is None:
-                    # tool lạ, bỏ qua an toàn
+                    # unknown tool, skip safely
                     llm_messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
@@ -251,8 +251,8 @@ class RAGPipeline:
                     citation_map = {str(i + 1): d for i, d in enumerate(context_docs)}
                     yield {"step": EventStep.TOOL_CALL, "status": EventStatus.EXECUTED, "data": {"found_count": len(extra_docs)}}
 
-                    # Context vừa được bổ sung -> phát lại "context_ready" để
-                    # frontend cập nhật sidebar với danh sách tài liệu mới nhất.
+                    # Context was just extended -> re-emit "context_ready" so
+                    # the frontend updates the sidebar with the latest document list.
                     yield {
                         "step": EventStep.CONTEXT_READY,
                         "status": EventStatus.DONE,
@@ -269,10 +269,10 @@ class RAGPipeline:
 
                 llm_messages.append({"role": "tool", "tool_call_id": tc["id"], "content": tool_result_content})
 
-            # Cập nhật lại phần "ngữ cảnh" cho lượt gọi tiếp theo bằng cách
-            # thêm 1 user message mới chứa context đã bổ sung, để model
-            # thực sự "nhìn thấy" nội dung mới lấy được (không chỉ là message
-            # thông báo suông ở trên).
+            # Update the "context" for the next call by adding 1 new user
+            # message containing the extended context, so the model actually
+            # "sees" the newly fetched content (not just the plain notice
+            # message above).
             llm_messages.append({
                 "role": "user",
                 "content": (
@@ -285,10 +285,10 @@ class RAGPipeline:
             })
 
             yield {"step": EventStep.TOOL_CALL, "status": EventStatus.DONE, "data": None}
-            # loop tiếp -> gọi lại LLM với context mới
+            # loop again -> call the LLM again with the new context
 
         # ==========================================
-        # KẾT THÚC: phát tín hiệu answer/done thật sự
+        # DONE: emit the real answer/done signal
         # ==========================================
         yield {
             "step": EventStep.ANSWER,

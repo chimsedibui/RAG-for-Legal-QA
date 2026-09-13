@@ -3,12 +3,14 @@
 from typing import Any, Dict, Generator, List, Optional
 
 from openai import OpenAI
+from urllib.parse import urlparse
 
 
 class OpenAILLMProvider:
     def __init__(self, base_url: str, api_key: str, model_name: str):
         self._client = OpenAI(base_url=base_url, api_key=api_key)
         self._model_name = model_name
+        self._is_openai = urlparse(base_url).hostname == "api.openai.com"
 
     def chat(
         self,
@@ -22,10 +24,9 @@ class OpenAILLMProvider:
             "model": self._model_name,
             "messages": messages,
             "stream": stream,
-            # vLLM/Qwen3-specific knob to disable "thinking" traces; harmless
-            # no-op extra_body for OpenAI-compatible backends that ignore it.
-            "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
         }
+        if not self._is_openai:
+            kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
 
         if tools:
             kwargs["tools"] = tools

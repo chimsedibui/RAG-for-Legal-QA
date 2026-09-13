@@ -13,7 +13,7 @@ class OpenAIEmbeddingProvider:
         self._model_name = model_name
 
     def embed(self, text: str) -> List[float]:
-        """Lấy vector embedding từ model."""
+        """Get the embedding vector from the model."""
         try:
             response = self._client.embeddings.create(model=self._model_name, input=text)
             return response.data[0].embedding
