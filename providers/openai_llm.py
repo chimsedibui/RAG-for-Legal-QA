@@ -19,6 +19,7 @@ class OpenAILLMProvider:
         tools: Optional[List[Dict[str, Any]]] = None,
         response_format: Optional[Dict[str, Any]] = None,
         stream: bool = False,
+        enable_thinking: bool = False,
     ) -> Generator[Any, None, None]:
         kwargs: Dict[str, Any] = {
             "model": self._model_name,
@@ -26,7 +27,10 @@ class OpenAILLMProvider:
             "stream": stream,
         }
         if not self._is_openai:
-            kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+            # Chỉ có ý nghĩa với model self-host kiểu Qwen3 (real OpenAI không
+            # có chat_template_kwargs này). Mặc định tắt "thinking mode" trừ
+            # khi người dùng bật toggle "cho phép suy luận sâu" trên UI.
+            kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": enable_thinking}}
 
         if tools:
             kwargs["tools"] = tools

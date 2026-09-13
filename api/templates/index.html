@@ -273,6 +273,24 @@
 
         @keyframes spin { 100% { transform: rotate(360deg); } }
 
+        /* Toggle "Suy luận sâu" — mặc định tắt (unchecked), người dùng tự bật
+           khi cần model suy luận kỹ hơn (chậm hơn) trước khi trả lời. */
+        .reasoning-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            margin-bottom: 6px;
+            width: fit-content;
+            user-select: none;
+        }
+        .reasoning-toggle input[type="checkbox"] {
+            accent-color: var(--primary);
+            cursor: pointer;
+        }
+
         /* Input Area */
         .input-wrapper {
             padding: 20px 10%;
@@ -352,6 +370,10 @@
         </div>
 
         <div class="input-wrapper">
+            <label class="reasoning-toggle" for="reasoningToggle" title="Cho phép model suy luận sâu hơn trước khi trả lời (chậm hơn). Mặc định tắt.">
+                <input type="checkbox" id="reasoningToggle">
+                <span>Suy luận sâu</span>
+            </label>
             <div class="input-box">
                 <textarea id="userInput" rows="1" placeholder="Đặt câu hỏi pháp lý (VD: Quy định về thời gian làm việc thêm giờ...)"></textarea>
                 <button class="send-btn" id="sendBtn" onclick="sendMessage()">
@@ -468,17 +490,33 @@
         let fullText = "";
         let citationsData = {};
 
-        // MỌI bước đều được APPEND thành 1 dòng MỚI trong nhật ký — không
-        // ghi đè lên dòng trước đó. Nếu có nhiều vòng lặp tool-call, mỗi lần
-        // "detected" / "executed" / "skipped" đều tạo dòng riêng, để người
-        // dùng xem lại được toàn bộ quá trình xử lý từ đầu đến cuối.
+        // Mỗi bước "đang xử lý" (spinner) tạo 1 dòng mới bằng addStepLine().
+        // Khi bước đó hoàn tất (done/executed/skipped/error), dùng
+        // updateStepLine() để SỬA LẠI đúng dòng đó (đổi icon hết quay + nội
+        // dung kết quả) thay vì cộng thêm dòng mới — tránh icon quay mãi và
+        // tránh log bị lặp dòng khi chuyển sang tra cứu văn bản tiếp theo.
         function addStepLine(iconClass, html, state) {
             const line = document.createElement('div');
             line.className = `step-line ${state}`;
             line.innerHTML = `<i class="${iconClass}"></i> <span>${html}</span>`;
             stepLogEl.appendChild(line);
             chatBox.scrollTop = chatBox.scrollHeight;
+            return line;
         }
+
+        function updateStepLine(line, iconClass, html, state) {
+            line.className = `step-line ${state}`;
+            line.innerHTML = `<i class="${iconClass}"></i> <span>${html}</span>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        // Slot lưu dòng "đang xử lý" hiện tại của từng nhóm bước, để biết
+        // dòng nào cần được cập nhật lại khi bước đó hoàn tất.
+        let subQueriesLine = null;
+        let retrievalLine = null;
+        let toolCheckLine = null;
+        let docLookupLine = null;
+        let answerLine = null;
 
         function handleStep(data) {
             const step = data.step;
@@ -487,16 +525,19 @@
 
             if (step === 'sub_queries') {
                 if (status === 'processing') {
-                    addStepLine('fa-solid fa-circle-notch', 'Đang phân tích câu hỏi...', 'active');
+                    subQueriesLine = addStepLine('fa-solid fa-circle-notch', 'Đang phân tích câu hỏi...', 'active');
                 } else if (status === 'done') {
-                    addStepLine('fa-solid fa-list-check',
-                        `Đã phân tách thành ${d.queries.length} truy vấn: <i class="detail">${d.queries.join(', ')}</i>`, 'done');
+                    const html = `Đã phân tách thành ${d.queries.length} truy vấn: <i class="detail">${d.queries.join(', ')}</i>`;
+                    if (subQueriesLine) { updateStepLine(subQueriesLine, 'fa-solid fa-list-check', html, 'done'); subQueriesLine = null; }
+                    else addStepLine('fa-solid fa-list-check', html, 'done');
                 }
             } else if (step === 'retrieval') {
                 if (status === 'processing') {
-                    addStepLine('fa-solid fa-circle-notch', 'Đang tìm kiếm trong cơ sở dữ liệu VBPL...', 'active');
+                    retrievalLine = addStepLine('fa-solid fa-circle-notch', 'Đang tìm kiếm trong cơ sở dữ liệu VBPL...', 'active');
                 } else if (status === 'done') {
-                    addStepLine('fa-solid fa-file-contract', `Tìm thấy ${d.count} đoạn trích liên quan`, 'done');
+                    const html = `Tìm thấy ${d.count} đoạn trích liên quan`;
+                    if (retrievalLine) { updateStepLine(retrievalLine, 'fa-solid fa-file-contract', html, 'done'); retrievalLine = null; }
+                    else addStepLine('fa-solid fa-file-contract', html, 'done');
                 }
             } else if (step === 'context_ready') {
                 // Ngữ cảnh (citations/sources) đã sẵn sàng, cập nhật sidebar
@@ -509,27 +550,40 @@
                     `Đã chuẩn bị ${d.sources ? d.sources.length : Object.keys(d.citations || {}).length} nguồn tài liệu tham khảo`, 'done');
             } else if (step === 'tool_call') {
                 if (status === 'processing') {
-                    addStepLine('fa-solid fa-circle-notch', 'Đang kiểm tra ngữ cảnh...', 'active');
+                    toolCheckLine = addStepLine('fa-solid fa-circle-notch', 'Đang kiểm tra ngữ cảnh...', 'active');
                 } else if (status === 'detected') {
+                    if (toolCheckLine) { updateStepLine(toolCheckLine, 'fa-solid fa-circle-check', 'Đã kiểm tra ngữ cảnh', 'done'); toolCheckLine = null; }
                     const args = d.args || {};
-                    addStepLine('fa-solid fa-book',
+                    docLookupLine = addStepLine('fa-solid fa-book',
                         `Đang tra cứu văn bản: <b>${args.doc_ref || ''}</b> ${args.content_query ? `(<i class="detail">${args.content_query}</i>)` : ''}...`, 'active');
                 } else if (status === 'executed') {
-                    addStepLine('fa-solid fa-book-open',
-                        `Tìm thấy thêm ${d.found_count} đoạn trích từ văn bản được trích dẫn`, 'done');
+                    const html = `Tìm thấy thêm ${d.found_count} đoạn trích từ văn bản được trích dẫn`;
+                    if (docLookupLine) { updateStepLine(docLookupLine, 'fa-solid fa-book-open', html, 'done'); docLookupLine = null; }
+                    else addStepLine('fa-solid fa-book-open', html, 'done');
                 } else if (status === 'skipped') {
-                    addStepLine('fa-solid fa-circle-check', 'Đủ thông tin, không cần tra cứu thêm', 'done');
+                    const html = 'Đủ thông tin, không cần tra cứu thêm';
+                    if (toolCheckLine) { updateStepLine(toolCheckLine, 'fa-solid fa-circle-check', html, 'done'); toolCheckLine = null; }
+                    else addStepLine('fa-solid fa-circle-check', html, 'done');
                 } else if (status === 'error') {
-                    addStepLine('fa-solid fa-triangle-exclamation', `Lỗi tra cứu: ${d.error || 'Không xác định'}`, 'error');
+                    const html = `Lỗi tra cứu: ${d.error || 'Không xác định'}`;
+                    if (docLookupLine) { updateStepLine(docLookupLine, 'fa-solid fa-triangle-exclamation', html, 'error'); docLookupLine = null; }
+                    else addStepLine('fa-solid fa-triangle-exclamation', html, 'error');
                 } else if (status === 'done') {
                     addStepLine('fa-solid fa-arrow-rotate-right', 'Đang gọi lại mô hình với ngữ cảnh mới...', 'done');
+                    // Sang vòng lặp tool-call mới: các slot "đang xử lý" trước đó
+                    // (nếu còn) đã được xử lý ở trên, reset để tránh dùng nhầm.
+                    toolCheckLine = null;
+                    docLookupLine = null;
                 }
             } else if (step === 'answer') {
                 if (status === 'start') {
-                    addStepLine('fa-solid fa-pen-nib', 'Đang tổng hợp câu trả lời...', 'active');
+                    if (toolCheckLine) { updateStepLine(toolCheckLine, 'fa-solid fa-circle-check', 'Đủ thông tin, không cần tra cứu thêm', 'done'); toolCheckLine = null; }
+                    answerLine = addStepLine('fa-solid fa-pen-nib', 'Đang tổng hợp câu trả lời...', 'active');
                     bubbleEl.style.display = 'block';
                 } else if (status === 'error') {
-                    addStepLine('fa-solid fa-triangle-exclamation', `Lỗi: ${d.error || 'Không xác định'}`, 'error');
+                    const html = `Lỗi: ${d.error || 'Không xác định'}`;
+                    if (answerLine) { updateStepLine(answerLine, 'fa-solid fa-triangle-exclamation', html, 'error'); answerLine = null; }
+                    else addStepLine('fa-solid fa-triangle-exclamation', html, 'error');
                 }
             }
 
@@ -541,7 +595,11 @@
             const response = await fetch('/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ messages: conversationHistory, stream: true })
+                body: JSON.stringify({
+                    messages: conversationHistory,
+                    stream: true,
+                    allow_reasoning: document.getElementById('reasoningToggle').checked,
+                })
             });
 
             const reader = response.body.getReader();
@@ -592,7 +650,8 @@
                             bubbleEl.querySelectorAll("pre code").forEach(el => hljs.highlightElement(el));
 
                             updateSidebar(citationsData);
-                            addStepLine('fa-solid fa-circle-check', 'Hoàn tất câu trả lời', 'done');
+                            if (answerLine) { updateStepLine(answerLine, 'fa-solid fa-circle-check', 'Hoàn tất câu trả lời', 'done'); answerLine = null; }
+                            else addStepLine('fa-solid fa-circle-check', 'Hoàn tất câu trả lời', 'done');
 
                             // Thu gọn (làm mờ) thay vì ẩn hẳn step log, để giữ lại
                             // "nhật ký" các bước đã thực hiện cho câu trả lời này.

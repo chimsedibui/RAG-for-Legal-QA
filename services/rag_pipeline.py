@@ -53,11 +53,21 @@ class RAGPipeline:
                 return m.get("content", "")
         return ""
 
-    def process(self, messages: List[Dict[str, str]], stream: bool = True) -> Generator[Dict[str, Any], None, None]:
+    def process(
+        self,
+        messages: List[Dict[str, str]],
+        stream: bool = True,
+        allow_reasoning: bool = False,
+    ) -> Generator[Dict[str, Any], None, None]:
         """Main processing pipeline.
 
         messages: conversation history as [{"role": "user"/"assistant", "content": "..."}]
         in chronological order; no need to include a system prompt (the pipeline adds its own).
+
+        allow_reasoning: mặc định False (tắt "thinking mode" của model, hành vi
+        cũ) — khi True, bỏ qua with_no_think() và bật enable_thinking cho các
+        model self-host hỗ trợ (vd Qwen3), phục vụ toggle "cho phép suy luận
+        sâu" trên UI.
         """
         conversation = [m for m in messages if m.get("role") in ("user", "assistant") and m.get("content")]
         if not conversation:
@@ -73,14 +83,17 @@ class RAGPipeline:
 
         try:
             sub_query_response = ""
-            sub_query_messages = with_no_think([
+            sub_query_messages = [
                 {"role": "system", "content": SYSTEM_PROMPT + SUB_QUERY_INSTRUCTIONS},
                 *messages,
-            ])
+            ]
+            if not allow_reasoning:
+                sub_query_messages = with_no_think(sub_query_messages)
             for message in self.llm.chat(
                 messages=sub_query_messages,
                 response_format=SUB_QUERY_SCHEMA,
                 stream=False,
+                enable_thinking=allow_reasoning,
             ):
                 sub_query_response = json.loads(message.content)
 
@@ -154,9 +167,10 @@ class RAGPipeline:
 
             try:
                 response_stream = self.llm.chat(
-                    messages=with_no_think(llm_messages),
+                    messages=llm_messages if allow_reasoning else with_no_think(llm_messages),
                     tools=tool_schemas,
                     stream=True,
+                    enable_thinking=allow_reasoning,
                 )
             except Exception as e:
                 yield {"step": EventStep.ANSWER, "status": EventStatus.ERROR, "data": {"error": str(e)}}

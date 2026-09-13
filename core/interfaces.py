@@ -15,6 +15,7 @@ class LLMProvider(Protocol):
         tools: Optional[list[dict]] = None,
         response_format: Optional[dict] = None,
         stream: bool = False,
+        enable_thinking: bool = False,
     ) -> Generator[Any, None, None]:
         """Streams SDK chunk objects if stream=True, else yields a single message object.
 

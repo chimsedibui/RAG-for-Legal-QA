@@ -29,12 +29,13 @@ class FakeLLMProvider:
         self._script = list(script)
         self.calls: List[Dict[str, Any]] = []
 
-    def chat(self, messages, *, tools=None, response_format=None, stream=False):
+    def chat(self, messages, *, tools=None, response_format=None, stream=False, enable_thinking=False):
         self.calls.append({
             "messages": messages,
             "tools": tools,
             "response_format": response_format,
             "stream": stream,
+            "enable_thinking": enable_thinking,
         })
         if not self._script:
             raise AssertionError("FakeLLMProvider script exhausted")

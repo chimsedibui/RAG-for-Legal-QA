@@ -71,6 +71,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     stream: bool = True
+    allow_reasoning: bool = False
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -81,7 +82,9 @@ async def read_root(request: Request):
     )
 
 
-def _run_pipeline_in_thread(conversation: List[dict], stream: bool, out_queue: "queue.Queue"):
+def _run_pipeline_in_thread(
+    conversation: List[dict], stream: bool, allow_reasoning: bool, out_queue: "queue.Queue"
+):
     """Run pipeline.process() (sync, blocking) in a separate thread.
 
     Since pipeline.process() is a sync generator containing blocking HTTP
@@ -98,7 +101,7 @@ def _run_pipeline_in_thread(conversation: List[dict], stream: bool, out_queue: "
     an HTTP call.
     """
     try:
-        for event in pipeline.process(messages=conversation, stream=stream):
+        for event in pipeline.process(messages=conversation, stream=stream, allow_reasoning=allow_reasoning):
             out_queue.put(event)
     except Exception as e:
         out_queue.put({"step": "answer", "status": "error", "data": {"error": str(e)}})
@@ -118,7 +121,7 @@ async def chat_endpoint(req: ChatRequest):
             out_queue: "queue.Queue" = queue.Queue()
             thread = threading.Thread(
                 target=_run_pipeline_in_thread,
-                args=(conversation, True, out_queue),
+                args=(conversation, True, req.allow_reasoning, out_queue),
                 daemon=True,
             )
             thread.start()
@@ -160,7 +163,7 @@ async def chat_endpoint(req: ChatRequest):
         }
 
         def _run_non_stream():
-            return list(pipeline.process(messages=conversation, stream=False))
+            return list(pipeline.process(messages=conversation, stream=False, allow_reasoning=req.allow_reasoning))
 
         try:
             loop = asyncio.get_event_loop()
