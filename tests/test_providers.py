@@ -201,3 +201,18 @@ def test_faiss_store_total_and_id_translation(small_faiss_store):
 def test_faiss_store_search_subset_filters_to_candidates(small_faiss_store):
     hits = small_faiss_store.search_subset([1.0, 0.0, 0.0, 0.0], candidate_faiss_ids={1, 2}, top_k=5)
     assert [h["chunk_id"] for h in hits] == ["c", "b"]
+@pytest.mark.parametrize("base_url,has_extra", [
+    ("https://api.openai.com/v1", False),
+    ("http://localhost:8000/v1", True),
+])
+def test_chat_backend_specific_parameters(base_url, has_extra):
+    provider = OpenAILLMProvider(base_url, "test-key", "model")
+    captured = {}
+
+    def create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message="ok")])
+
+    provider._client.chat = SimpleNamespace(completions=SimpleNamespace(create=create))
+    assert list(provider.chat([{"role": "user", "content": "hi"}])) == ["ok"]
+    assert ("extra_body" in captured) is has_extra

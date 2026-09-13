@@ -9,6 +9,12 @@ from typing import Any, Dict, List, Optional
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def isolate_local_dotenv(monkeypatch, tmp_path):
+    """Do not load developer credentials or settings into offline tests."""
+    monkeypatch.chdir(tmp_path)
+
+
 class FakeLLMProvider:
     """Scriptable LLMProvider: pop() one scripted response per .chat() call.
 
