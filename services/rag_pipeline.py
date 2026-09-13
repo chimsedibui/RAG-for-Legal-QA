@@ -57,18 +57,20 @@ class RAGPipeline:
         self,
         messages: List[Dict[str, str]],
         stream: bool = True,
-        allow_reasoning: bool = False,
+        reasoning_level: str = "off",
     ) -> Generator[Dict[str, Any], None, None]:
         """Main processing pipeline.
 
         messages: conversation history as [{"role": "user"/"assistant", "content": "..."}]
         in chronological order; no need to include a system prompt (the pipeline adds its own).
 
-        allow_reasoning: mặc định False (tắt "thinking mode" của model, hành vi
-        cũ) — khi True, bỏ qua with_no_think() và bật enable_thinking cho các
-        model self-host hỗ trợ (vd Qwen3), phục vụ toggle "cho phép suy luận
-        sâu" trên UI.
+        reasoning_level: "off"/"low"/"medium"/"high", theo toggle "Suy luận sâu"
+        trên UI. "off" (mặc định) giữ hành vi cũ — tắt "thinking mode" của model
+        qua with_no_think()/enable_thinking=False. Với low/medium/high, bỏ qua
+        with_no_think(), bật enable_thinking cho các model self-host hỗ trợ (vd
+        Qwen3), và chèn thêm 1 câu hướng dẫn mức độ suy luận vào system prompt.
         """
+        allow_reasoning = reasoning_level != "off"
         conversation = [m for m in messages if m.get("role") in ("user", "assistant") and m.get("content")]
         if not conversation:
             yield {"step": EventStep.ANSWER, "status": EventStatus.ERROR, "data": {"error": "Không có nội dung hội thoại hợp lệ."}}
@@ -151,7 +153,7 @@ class RAGPipeline:
         # Structure: [system context + citation rules, ...the whole original conversation]
         # Kept multi-turn so the LLM understands the conversation correctly, instead of flattening it into 1 user message.
         llm_messages = [
-            build_context_message(context_docs),
+            build_context_message(context_docs, reasoning_level=reasoning_level),
             *conversation,
         ]
 

@@ -7,6 +7,22 @@ from typing import Any, Dict, List
 
 NO_THINK_SUFFIX = "/no_think"
 
+# Hướng dẫn suy luận theo mức độ, chèn thêm vào system prompt khi người dùng
+# bật toggle "Suy luận sâu" trên UI và chọn mức tương ứng. "off" không có
+# hướng dẫn gì (giữ hành vi mặc định: model trả lời nhanh, không suy luận sâu).
+REASONING_LEVEL_INSTRUCTIONS: Dict[str, str] = {
+    "off": "",
+    "low": "Hãy suy luận ở mức tối thiểu cần thiết, ưu tiên trả lời nhanh, súc tích.",
+    "medium": "Hãy suy luận vừa đủ trước khi trả lời, cân bằng giữa tốc độ và độ chính xác.",
+    "high": "Hãy suy luận thật kỹ, cân nhắc nhiều khía cạnh và đối chiếu kỹ ngữ cảnh trước khi đưa ra câu trả lời cuối cùng.",
+}
+
+
+def reasoning_instruction(level: str) -> str:
+    """Trả về câu hướng dẫn suy luận tương ứng với level ("off"/"low"/"medium"/"high"),
+    hoặc chuỗi rỗng nếu level không hợp lệ/"off"."""
+    return REASONING_LEVEL_INSTRUCTIONS.get(level, "")
+
 SYSTEM_PROMPT = (
     "Bạn là trợ lý pháp lý thông minh. Hãy trả lời chính xác, chuyên nghiệp dựa trên ngữ cảnh được cung cấp. "
     "Nếu không tìm thấy thông tin trong ngữ cảnh, hãy nói rõ là không có thông tin."
@@ -39,8 +55,8 @@ SUB_QUERY_SCHEMA = {
                 "reasoning": {"type": "string", "description": "suy luận ngắn gọn"},
                 "queries": {"type": "array", "items": {"type": "string"}},
             },
-            "required": ["queries"],
-            "additionalProperties": True,
+            "required": ["reasoning", "queries"],
+            "additionalProperties": False,
         },
     },
 }
@@ -53,11 +69,15 @@ def format_context(docs: List[Dict[str, Any]]) -> str:
     return "\n\n".join(f"[{i + 1}]: {d.get('content', '')}" for i, d in enumerate(docs))
 
 
-def build_context_message(context_docs: List[Dict[str, Any]]) -> Dict[str, str]:
+def build_context_message(context_docs: List[Dict[str, Any]], reasoning_level: str = "off") -> Dict[str, str]:
     """Tạo 1 system message chứa ngữ cảnh + quy tắc trích dẫn, được chèn vào
     NGAY TRƯỚC lượt hội thoại của user để LLM luôn thấy context mới nhất mà
-    không phá vỡ cấu trúc nhiều lượt hội thoại."""
+    không phá vỡ cấu trúc nhiều lượt hội thoại.
+
+    reasoning_level: "off"/"low"/"medium"/"high" — thêm 1 dòng hướng dẫn mức độ
+    suy luận tương ứng (rỗng nếu "off"), theo toggle "Suy luận sâu" trên UI."""
     context_text = format_context(context_docs)
+    extra_instruction = reasoning_instruction(reasoning_level)
     return {
         "role": "system",
         "content": f"""Bạn là trợ lý pháp lý thông minh. Hãy trả lời chính xác, chuyên nghiệp dựa trên ngữ cảnh được cung cấp.
@@ -74,7 +94,9 @@ QUY TẮC TRÍCH DẪN BẮT BUỘC:
   chính xác, hãy gọi tool `search_referenced_document` thay vì trả lời ngay.
 - Nếu không tìm thấy thông tin trong ngữ cảnh, hãy nói rõ là không có thông tin.
 - Hãy tham khảo các lượt hội thoại trước đó (nếu có) để hiểu đúng ý người dùng, nhưng chỉ trích dẫn [N]
-  cho thông tin lấy từ ngữ cảnh pháp lý ở trên.""",
+  cho thông tin lấy từ ngữ cảnh pháp lý ở trên.{f'''
+
+{extra_instruction}''' if extra_instruction else ''}""",
     }
 
 

@@ -71,7 +71,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     stream: bool = True
-    allow_reasoning: bool = False
+    reasoning_level: Literal["off", "low", "medium", "high"] = "off"
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -83,7 +83,8 @@ async def read_root(request: Request):
 
 
 def _run_pipeline_in_thread(
-    conversation: List[dict], stream: bool, allow_reasoning: bool, out_queue: "queue.Queue"
+    conversation: List[dict], stream: bool, reasoning_level: str, out_queue: "queue.Queue",
+    cancelled: threading.Event,
 ):
     """Run pipeline.process() (sync, blocking) in a separate thread.
 
@@ -100,13 +101,23 @@ def _run_pipeline_in_thread(
     as it's ready, regardless of whether that thread is currently blocked on
     an HTTP call.
     """
+    events = pipeline.process(messages=conversation, stream=stream, reasoning_level=reasoning_level)
     try:
-        for event in pipeline.process(messages=conversation, stream=stream, allow_reasoning=allow_reasoning):
+        while not cancelled.is_set():
+            try:
+                event = next(events)
+            except StopIteration:
+                break
+            if cancelled.is_set():
+                break
             out_queue.put(event)
     except Exception as e:
         out_queue.put({"step": "answer", "status": "error", "data": {"error": str(e)}})
     finally:
-        out_queue.put(_SENTINEL)
+        try:
+            events.close()
+        finally:
+            out_queue.put(_SENTINEL)
 
 
 @app.post("/chat")
@@ -119,9 +130,10 @@ async def chat_endpoint(req: ChatRequest):
     if req.stream:
         async def event_generator():
             out_queue: "queue.Queue" = queue.Queue()
+            cancelled = threading.Event()
             thread = threading.Thread(
                 target=_run_pipeline_in_thread,
-                args=(conversation, True, req.allow_reasoning, out_queue),
+                args=(conversation, True, req.reasoning_level, out_queue, cancelled),
                 daemon=True,
             )
             thread.start()
@@ -140,6 +152,10 @@ async def chat_endpoint(req: ChatRequest):
                 yield "data: [DONE]\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'step': 'answer', 'status': 'error', 'data': {'error': str(e)}}, ensure_ascii=False)}\n\n"
+            finally:
+                cancelled.set()
+                # Release any executor thread waiting for another queue item.
+                out_queue.put(_SENTINEL)
 
         return StreamingResponse(
             event_generator(),
@@ -163,7 +179,7 @@ async def chat_endpoint(req: ChatRequest):
         }
 
         def _run_non_stream():
-            return list(pipeline.process(messages=conversation, stream=False, allow_reasoning=req.allow_reasoning))
+            return list(pipeline.process(messages=conversation, stream=False, reasoning_level=req.reasoning_level))
 
         try:
             loop = asyncio.get_event_loop()
