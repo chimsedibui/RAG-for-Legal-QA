@@ -28,6 +28,7 @@ class EmbeddingSettings(BaseSettings):
     base_url: str = Field(alias="EMBEDDING_BASE_URL")
     api_key: str = Field(alias="EMBEDDING_API_KEY")
     model_name: str = Field(alias="EMBEDDING_MODEL_NAME")
+    dimension: int = Field(default=1536, gt=0, alias="EMBEDDING_DIM")
 
 
 class RerankSettings(BaseSettings):
@@ -46,6 +47,16 @@ class RetrievalSettings(BaseSettings):
     tool_search_top_k: int = Field(default=5, alias="TOOL_SEARCH_TOP_K")
     max_context_chunks: int = Field(default=50, alias="MAX_CONTEXT_CHUNKS")
     max_tool_iterations: int = Field(default=3, alias="MAX_TOOL_ITERATIONS")
+
+
+class CrawlSettings(BaseSettings):
+    """Limits the crawl scope in pipeline/crawl_preprocess.py."""
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    date_from: Optional[str] = Field(default=None, alias="CRAWL_DATE_FROM")
+    date_to: Optional[str] = Field(default=None, alias="CRAWL_DATE_TO")
+    max_docs: Optional[int] = Field(default=None, gt=0, alias="CRAWL_MAX_DOCS")
+    page_size: int = Field(default=10, gt=0, alias="CRAWL_PAGE_SIZE")
 
 
 class DataSettings(BaseSettings):
@@ -83,6 +94,7 @@ class Settings(BaseSettings):
     rerank: RerankSettings = Field(default_factory=RerankSettings)
     retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
     data: DataSettings = Field(default_factory=DataSettings)
+    crawl: CrawlSettings = Field(default_factory=CrawlSettings)
 
     @property
     def reranker_enabled(self) -> bool:

@@ -59,7 +59,7 @@ def build_pipeline() -> RAGPipeline:
 
 pipeline = build_pipeline()
 
-# Sentinel để báo hiệu generator (chạy trong thread riêng) đã kết thúc
+# Sentinel signaling that the generator (running in a separate thread) has finished
 _SENTINEL = object()
 
 
@@ -82,18 +82,20 @@ async def read_root(request: Request):
 
 
 def _run_pipeline_in_thread(conversation: List[dict], stream: bool, out_queue: "queue.Queue"):
-    """Chạy pipeline.process() (sync, blocking) trong 1 thread riêng.
+    """Run pipeline.process() (sync, blocking) in a separate thread.
 
-    Vì pipeline.process() là generator đồng bộ chứa các lời gọi HTTP blocking
-    (LLM sub-query, semantic search, LLM streaming), nếu chạy trực tiếp bằng
-    `for event in pipeline.process(...)` bên trong 1 `async def`, mỗi bước
-    blocking đó sẽ giữ chặt event loop của Uvicorn, khiến các event đã yield
-    trước đó không được flush ra socket ngay -> client thấy "giật cục", chỉ
-    nhận được dữ liệu dồn cục khi có 1 đoạn code async khác nhường CPU.
+    Since pipeline.process() is a sync generator containing blocking HTTP
+    calls (LLM sub-query, semantic search, LLM streaming), running it directly
+    with `for event in pipeline.process(...)` inside an `async def` would let
+    each blocking step hold Uvicorn's event loop hostage, so events already
+    yielded wouldn't get flushed to the socket right away -> the client would
+    see "jerky" delivery, only getting data in bursts whenever some other
+    async code happened to yield the CPU.
 
-    Chạy toàn bộ generator trong thread riêng và đẩy từng event qua queue.Queue
-    (thread-safe) giúp mỗi event được gửi ra ngay khi có, độc lập với việc
-    thread đó có đang block ở HTTP call hay không.
+    Running the whole generator in a separate thread and pushing each event
+    through a queue.Queue (thread-safe) lets every event get sent out as soon
+    as it's ready, regardless of whether that thread is currently blocked on
+    an HTTP call.
     """
     try:
         for event in pipeline.process(messages=conversation, stream=stream):
@@ -125,10 +127,6 @@ async def chat_endpoint(req: ChatRequest):
 
             try:
                 while True:
-                    # out_queue.get là lời gọi blocking (sync) -> chạy trong
-                    # threadpool executor riêng để KHÔNG chiếm event loop
-                    # chính, cho phép Uvicorn flush dữ liệu ra ngay khi có,
-                    # thay vì phải đợi cả pipeline chạy xong mới trả 1 lượt.
                     event = await loop.run_in_executor(None, out_queue.get)
 
                     if event is _SENTINEL:
@@ -144,16 +142,16 @@ async def chat_endpoint(req: ChatRequest):
             event_generator(),
             media_type="text/event-stream",
             headers={
-                # Tắt buffering ở phía reverse proxy (vd nginx) để SSE không
-                # bị giữ lại theo lô trước khi tới trình duyệt.
+                # Disable buffering on the reverse proxy side (e.g. nginx) so
+                # SSE isn't held back in batches before reaching the browser.
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",
                 "Connection": "keep-alive",
             },
         )
     else:
-        # Non-stream: chạy trong threadpool để không block event loop chính,
-        # cho phép server vẫn phục vụ được request khác song song.
+        # Non-stream: run in a threadpool so the main event loop isn't blocked,
+        # letting the server keep serving other requests concurrently.
         full_response = {
             "steps": [],
             "final_answer": "",
