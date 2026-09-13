@@ -1,70 +1,70 @@
-# Khảo sát: Các phương pháp chống Hallucination hiện có trên thị trường (2025-2026)
+# Survey: Existing hallucination-mitigation approaches on the market (2025-2026)
 
-> Tài liệu khảo sát (research), làm căn cứ cho định hướng kiến trúc ở [01-accuracy-and-cross-validation.md](01-accuracy-and-cross-validation.md). Nguồn tổng hợp qua research thời điểm 2026-08.
+> Research document, used as the basis for the architecture direction in [01-accuracy-and-cross-validation.md](01-accuracy-and-cross-validation.md). Sources compiled via research as of 2026-08.
 
-## 1. Vì sao cần quan tâm đặc biệt tới hallucination trong lĩnh vực pháp lý
+## 1. Why hallucination deserves special attention in the legal domain
 
-Nghiên cứu của Stanford RegLab/HAI (Magesh et al., *Journal of Empirical Legal Studies* 2025) kiểm thử hơn 200 câu hỏi pháp lý trên các sản phẩm AI pháp lý thương mại:
+A Stanford RegLab/HAI study (Magesh et al., *Journal of Empirical Legal Studies* 2025) tested over 200 legal questions on commercial legal-AI products:
 
-- **Lexis+ AI**: hallucinate >17% số lần.
-- **Westlaw AI-Assisted Research**: hallucinate >34% số lần.
-- LexisNexis sau đó phải rút lại tuyên bố marketing "100% không hallucination", giới hạn lại chỉ còn áp dụng cho phần "linked citations".
+- **Lexis+ AI**: hallucinates >17% of the time.
+- **Westlaw AI-Assisted Research**: hallucinates >34% of the time.
+- LexisNexis subsequently had to walk back its "100% hallucination-free" marketing claim, restricting it to just the "linked citations" portion.
 
-Theo một tracker công khai, tính tới giữa 2026 đã có **hơn 1.590 vụ việc được ghi nhận** có trích dẫn do AI "bịa" xuất hiện trong hồ sơ tòa án trên toàn thế giới; riêng Q1/2026 tổng mức phạt vì lạm dụng AI trong tố tụng đã lên tới 145.000 USD. ABA Formal Opinion 512 (Mỹ) khẳng định luật sư chịu trách nhiệm hoàn toàn về output của AI bất kể dùng công cụ nào.
+According to a public tracker, as of mid-2026 there have been **over 1,590 recorded cases** of AI-"fabricated" citations appearing in court filings worldwide; in Q1/2026 alone, total fines for AI misuse in litigation reached $145,000. ABA Formal Opinion 512 (US) affirms that lawyers bear full responsibility for AI output regardless of which tool is used.
 
-→ Kết luận: hallucination trong lĩnh vực pháp lý **không phải rủi ro lý thuyết**, các sản phẩm thương mại lớn hiện tại vẫn hallucinate ở mức 2 chữ số phần trăm dù đã đầu tư mạnh — nên bất kỳ cải thiện nào cũng cần đo lường được (xem mục 5 tài liệu 01), không chỉ dựa vào cảm giác "có vẻ tốt hơn".
+→ Conclusion: hallucination in the legal domain is **not a theoretical risk** — today's major commercial products still hallucinate at double-digit percentage rates despite heavy investment — so any improvement must be measurable (see section 5 of document 01), not just based on a "feels better" impression.
 
-## 2. Các kỹ thuật kiến trúc (architectural patterns)
+## 2. Architectural patterns
 
-| Kỹ thuật | Cách hoạt động | Dễ/khó bolt-on vào pipeline hiện tại |
+| Technique | How it works | How easy is it to bolt onto the current pipeline |
 |---|---|---|
-| **Corrective RAG (CRAG)** | 1 model nhỏ chấm điểm chunk retrieval là đúng/mơ hồ/sai; nếu sai → re-retrieve hoặc fallback sang web search; nếu mơ hồ → lọc bớt phần không liên quan trước khi đưa vào context | **Dễ** — chỉ là 1 bước scoring + rẽ nhánh, không cần sửa retriever hiện có. Báo cáo giảm ~30% hallucination trong thực tế |
-| **Self-RAG** | Model tự sinh "reflection token" quyết định có cần retrieve tiếp không, và tự đánh giá câu trả lời có được context hỗ trợ không | **Khó hơn** — cần model được fine-tune/prompt riêng cho việc này; có thể mô phỏng bằng prompt "tự phê bình" nhưng kém tin cậy hơn bản gốc |
-| **FLARE / DRAGIN** | Retrieve tiếp ngay giữa lúc đang sinh câu trả lời khi model "không chắc" về đoạn tiếp theo (dựa vào logprob) | **Trung bình** — cần LLM API trả về logprob, không phải endpoint OpenAI-compatible nào cũng hỗ trợ |
-| **RAG-Fusion** | Sinh nhiều biến thể câu hỏi, retrieve riêng từng biến thể, gộp kết quả bằng Reciprocal Rank Fusion | **Rất dễ** — dự án đã có bước sub-query decomposition, chỉ cần đổi cách gộp kết quả (RRF thay vì dedupe đơn giản) |
-| **Self-consistency / ensemble voting** | Chạy lại cùng 1 câu hỏi N lần (temperature > 0) hoặc qua nhiều model, biểu quyết theo đa số; câu trả lời càng đồng nhất thì càng đáng tin | **Dễ về kỹ thuật, tốn kém về chi phí** — chỉ nên bật có điều kiện cho câu hỏi quan trọng |
-| **Citation/groundedness verification (NLI-based)** | Sau khi sinh câu trả lời, kiểm tra từng câu/claim có được đoạn văn bản trích dẫn "entail" (suy ra được) hay không, dùng model NLI/cross-encoder chuyên dụng | **Dễ, ROI cao nhất** — đây là kỹ thuật đơn lẻ đáng làm nhất theo khảo sát này |
-| **Generate-Verify-Correct với verbatim quote** | Bắt LLM trích dẫn nguyên văn; script kiểm tra đoạn trích có thực sự tồn tại trong chunk nguồn (substring/fuzzy match) | **Rất dễ** — thuần Python, không cần model, độ chính xác cao cho văn bản pháp luật (vốn có câu chữ chính xác, ít đồng nghĩa) |
-| **Confidence scoring + abstention** | Gộp điểm retrieval + điểm verify + độ đồng thuận self-consistency thành 1 confidence; dưới ngưỡng → từ chối trả lời/escalate người | **Dễ** — chỉ là công thức gộp điểm, không cần hạ tầng mới |
-| **Human-in-the-loop** | Coi output AI là bản nháp; bắt buộc luật sư review trước khi dùng thật; không chấp nhận dùng 1 AI để tự verify AI khác thay cho review của con người | **Không phải hạ tầng — là quy trình/UX**: gắn cờ câu trả lời confidence thấp để bắt buộc review, tương tự cảnh báo y tế "tham khảo ý kiến chuyên gia" |
+| **Corrective RAG (CRAG)** | A small model scores retrieved chunks as correct/ambiguous/incorrect; if incorrect → re-retrieve or fall back to web search; if ambiguous → filter out the irrelevant parts before feeding into context | **Easy** — just 1 scoring step + branching, no need to change the existing retriever. Reported to reduce hallucination by ~30% in practice |
+| **Self-RAG** | The model generates its own "reflection tokens" deciding whether it needs to retrieve further, and self-assesses whether the answer is supported by context | **Harder** — needs a model fine-tuned/prompted specifically for this; can be simulated with a "self-critique" prompt but is less reliable than the original |
+| **FLARE / DRAGIN** | Retrieves again mid-generation when the model is "unsure" about the next span (based on logprob) | **Medium** — needs an LLM API that returns logprobs, which not every OpenAI-compatible endpoint supports |
+| **RAG-Fusion** | Generates multiple question variants, retrieves separately for each, merges results via Reciprocal Rank Fusion | **Very easy** — the project already has a sub-query decomposition step, just needs to change how results are merged (RRF instead of simple dedup) |
+| **Self-consistency / ensemble voting** | Re-runs the same question N times (temperature > 0) or across multiple models, majority-votes; the more consistent the answers, the more trustworthy | **Technically easy, expensive in cost** — should only be enabled conditionally for important questions |
+| **Citation/groundedness verification (NLI-based)** | After generating an answer, checks whether each sentence/claim is "entailed" by the cited passage, using a dedicated NLI/cross-encoder model | **Easy, highest ROI** — this is the single most worthwhile technique per this survey |
+| **Generate-Verify-Correct with verbatim quote** | Forces the LLM to quote verbatim; a script checks whether the quoted text actually exists in the source chunk (substring/fuzzy match) | **Very easy** — pure Python, no model needed, high accuracy for legal text (which has precise wording, few synonyms) |
+| **Confidence scoring + abstention** | Combines retrieval score + verification score + self-consistency agreement into 1 confidence value; below a threshold → refuse to answer/escalate to a human | **Easy** — just a scoring formula, no new infrastructure |
+| **Human-in-the-loop** | Treats AI output as a draft; requires a lawyer to review before real use; doesn't accept using 1 AI to verify another AI in place of human review | **Not infrastructure — it's process/UX**: flag low-confidence answers to force review, similar to a medical "consult a professional" warning |
 
-## 3. Công cụ đánh giá (evaluation frameworks) đang được dùng thực tế
+## 3. Evaluation frameworks used in practice
 
-| Công cụ | Loại | Dùng khi nào |
+| Tool | Type | When to use |
 |---|---|---|
-| **RAGAS** | Mã nguồn mở, tính faithfulness/context-precision/context-recall | Chạy offline trong CI trên tập eval cố định, không chạy real-time |
-| **DeepEval** | Tương tự RAGAS, style pytest assertion | Thích hợp gate trong pipeline CI (fail build nếu faithfulness dưới ngưỡng) |
-| **TruLens** | Tracing/feedback function cho production, hay đi kèm Langfuse | Quan sát chất lượng theo thời gian thực ở production |
-| **Vectara HHEM (2.1)** | Cross-encoder mã nguồn mở, chuyên chấm điểm groundedness | Có thể tự host, nhanh hơn nhiều so với dùng LLM-judge (báo cáo: ~10 phút vs ~8 giờ cho cùng khối lượng đánh giá), độ chính xác benchmark ~78.9% — **ứng viên chính cho `HHEMVerifier` ở tài liệu 01** |
-| **Patronus Lynx / Galileo Luna** | Model nhỏ chuyên phát hiện hallucination, nhanh/rẻ hơn LLM-as-judge | Nếu muốn dùng SaaS thay vì tự host |
-| **Anthropic Citations API / Gemini Grounding with Search** | Tính năng grounding có sẵn của nhà cung cấp LLM | Chỉ dùng được nếu đổi sang Claude/Gemini; với endpoint OpenAI-compatible tổng quát vẫn cần tự làm bước verify riêng |
+| **RAGAS** | Open source, computes faithfulness/context-precision/context-recall | Run offline in CI against a fixed eval set, not real-time |
+| **DeepEval** | Similar to RAGAS, pytest-assertion style | Suited to gating in a CI pipeline (fail the build if faithfulness is below a threshold) |
+| **TruLens** | Tracing/feedback function for production, often paired with Langfuse | Observing quality in real time in production |
+| **Vectara HHEM (2.1)** | Open-source cross-encoder specialized in scoring groundedness | Self-hostable, much faster than using an LLM-judge (reported: ~10 minutes vs ~8 hours for the same evaluation workload), benchmark accuracy ~78.9% — **the leading candidate for `HHEMVerifier` in document 01** |
+| **Patronus Lynx / Galileo Luna** | Small models specialized in detecting hallucination, faster/cheaper than LLM-as-judge | If you want to use SaaS instead of self-hosting |
+| **Anthropic Citations API / Gemini Grounding with Search** | Built-in grounding features from LLM providers | Only usable if switching to Claude/Gemini; with a generic OpenAI-compatible endpoint, a separate verify step still needs to be built |
 
-**Khuyến nghị stack cho dự án**: chạy 1 detector nhanh (HHEM) trên mọi/đa số request + LLM-as-judge (dùng `LLMProvider` sẵn có) trên tập mẫu để review sâu hơn định kỳ — không cần chờ tích hợp SaaS (Galileo/Patronus) ngay từ đầu.
+**Recommended stack for this project**: run 1 fast detector (HHEM) on all/most requests + LLM-as-judge (using the existing `LLMProvider`) on a sampled set for deeper periodic review — no need to wait for SaaS integration (Galileo/Patronus) from the start.
 
-## 4. Đặc thù pháp lý — grounding theo statute/case-law
+## 4. Legal-domain specifics — grounding against statute/case-law
 
-- **Citation Grounding metric**: tỉ lệ % trích dẫn trong câu trả lời thực sự tồn tại (khớp với 1 node thật trong đồ thị/tập văn bản gốc) — dự án hiện đã có sẵn cấu trúc gần giống (`chunk_map.json`, `article_index_map.json`) nên việc thêm bước kiểm tra "citation `[N]` có ánh xạ đúng tới 1 chunk thật + nội dung trích khớp verbatim" gần như không tốn thêm hạ tầng.
-- **Legal citation graph / Graph-RAG**: mô hình hoá quan hệ trích dẫn giữa văn bản-văn bản, điều-điều dưới dạng đồ thị (thường dùng Neo4j), vừa dùng để retrieval vừa dùng để validate câu trả lời. Đây là hướng đầu tư lớn hơn (tuần thay vì ngày) — chỉ nên cân nhắc nếu cần mô hình hoá quan hệ hiệu lực/sửa đổi văn bản pháp luật phức tạp (rất phù hợp bối cảnh luật Việt Nam hay có Nghị định/Thông tư sửa đổi, bổ sung, thay thế lẫn nhau).
-- Với quy mô hiện tại của dự án (chunk theo Điều/Khoản/Điểm, không phải toàn văn bản), 1 phiên bản **rút gọn** của ý tưởng graph — bảng tra `doc_id + article → canonical text` (đã có sẵn dưới dạng `article_index_map.json`) — là điểm khởi đầu hợp lý, không cần dựng graph DB ngay.
+- **Citation Grounding metric**: the % of citations in an answer that actually exist (matching a real node in the graph/source document set) — the project already has a similar-enough structure (`chunk_map.json`, `article_index_map.json`), so adding a check that "citation `[N]` maps correctly to a real chunk + the quoted content matches verbatim" costs almost no extra infrastructure.
+- **Legal citation graph / Graph-RAG**: models the citation relationships between document-document, article-article as a graph (typically using Neo4j), used both for retrieval and for validating answers. This is a bigger investment (weeks rather than days) — only worth considering if there's a need to model complex effective/amendment relationships between legal documents (very relevant to Vietnamese law, where Decrees/Circulars often amend, supplement, or replace one another).
+- Given the project's current scale (chunked by Article/Clause/Point, not whole documents), a **stripped-down** version of the graph idea — a lookup table `doc_id + article → canonical text` (already available as `article_index_map.json`) — is a reasonable starting point, no need to stand up a graph DB right away.
 
-## 5. Web-search-augmented RAG — cross-validate với nguồn ngoài
+## 5. Web-search-augmented RAG — cross-validating against external sources
 
-- **Pattern phổ biến**: query FAISS trước; nếu bước CRAG-style scoring hoặc bước verify sau khi sinh câu trả lời cho confidence thấp → fallback sang web search để đối chiếu, hoặc gắn cờ "cần xác minh thêm" thay vì im lặng trả lời sai.
-- **Nhà cung cấp search API phổ biến**: Tavily (được coi là "tiêu chuẩn thực tế" cho AI agent năm 2025-2026, dễ tích hợp), Exa (semantic search), Bing Search API, SerpAPI, You.com API — khác nhau chủ yếu ở cách cấu trúc kết quả trả về và chi phí, không khác biệt lớn về chất lượng cho use-case cross-check.
-- **Lưu ý riêng cho pháp luật Việt Nam**: web search có thể hữu ích để phát hiện văn bản đã **hết hiệu lực/được sửa đổi** mà kho dữ liệu nội bộ (crawl 1 lần, xem `pipeline/crawl_preprocess.py`) chưa cập nhật — đây là rủi ro hallucination đặc thù của domain pháp lý (thông tin đúng tại thời điểm crawl nhưng sai tại thời điểm hỏi), khác với hallucination "bịa nội dung" thông thường.
+- **Common pattern**: query FAISS first; if a CRAG-style scoring step or a post-generation verify step reports low confidence → fall back to web search to cross-check, or flag "needs further verification" instead of silently returning a wrong answer.
+- **Common search API providers**: Tavily (regarded as the "de facto standard" for AI agents in 2025-2026, easy to integrate), Exa (semantic search), Bing Search API, SerpAPI, You.com API — differing mainly in how results are structured and cost, not much difference in quality for the cross-check use case.
+- **Note specific to Vietnamese law**: web search can be useful for detecting documents that have **expired/been amended** which the internal data store (crawled once, see `pipeline/crawl_preprocess.py`) hasn't picked up yet — this is a hallucination risk specific to the legal domain (information correct at crawl time but wrong at query time), distinct from ordinary "made-up content" hallucination.
 
-## 6. Khuyến nghị áp dụng cho dự án (xếp theo độ ưu tiên)
+## 6. Recommendations for this project (in priority order)
 
-1. **Verbatim quote / citation existence check** — làm ngay, gần như miễn phí, bắt được lỗi trích dẫn sai/bịa.
-2. **RAGAS/DeepEval trong CI** trên 1 tập câu hỏi eval cố định — để có con số đo lường trước khi tối ưu tiếp, tránh tối ưu "cảm tính".
-3. **HHEM (hoặc tương đương) làm groundedness scorer runtime** — chi phí thấp, hiệu quả cao theo benchmark.
-4. **RAG-Fusion cho sub-query** — cải thiện retrieval mà không cần thêm interface mới.
-5. **Web search fallback có điều kiện** (Tavily/Exa) — chỉ khi độ tin cậy nội bộ thấp, đặc biệt hữu ích để bắt văn bản đã hết hiệu lực.
-6. **Self-consistency/ensemble** — để cuối vì tốn kém, chỉ bật cho câu hỏi được đánh dấu high-stakes.
+1. **Verbatim quote / citation existence check** — do this now, nearly free, catches wrong/fabricated citations.
+2. **RAGAS/DeepEval in CI** against a fixed eval question set — to get measurable numbers before further optimizing, avoiding "gut feel" optimization.
+3. **HHEM (or equivalent) as a runtime groundedness scorer** — low cost, high effectiveness per the benchmarks.
+4. **RAG-Fusion for sub-queries** — improves retrieval without needing a new interface.
+5. **Conditional web search fallback** (Tavily/Exa) — only when internal confidence is low, especially useful for catching expired documents.
+6. **Self-consistency/ensemble** — save for last since it's expensive, only enable for questions flagged high-stakes.
 
-Chi tiết triển khai theo giai đoạn: xem [01-accuracy-and-cross-validation.md](01-accuracy-and-cross-validation.md) mục 4.
+Phased implementation details: see [01-accuracy-and-cross-validation.md](01-accuracy-and-cross-validation.md) section 4.
 
-## Nguồn tham khảo
+## References
 
 - Magesh et al., "Hallucination-Free? Assessing the Reliability of Leading AI Legal Research Tools", *Journal of Empirical Legal Studies* (2025) — https://onlinelibrary.wiley.com/doi/full/10.1111/jels.12413
 - CRAG (Corrective RAG) — https://github.com/HuskyInSalt/CRAG , https://openreview.net/forum?id=JnWJbrnaUE
@@ -75,5 +75,5 @@ Chi tiết triển khai theo giai đoạn: xem [01-accuracy-and-cross-validation
 - Anthropic Citations API — https://claude.com/blog/introducing-citations-api
 - Gemini Grounding with Search — https://ai.google.dev/gemini-api/docs/google-search
 - Legal citation graphs / Citation Grounding metric — https://arxiv.org/pdf/2606.00898 , https://arxiv.org/pdf/2605.28120
-- Ontology-driven Graph RAG cho văn bản pháp luật — https://journals.sagepub.com/doi/10.3233/FAIA251598
-- So sánh search API cho AI agent (Tavily/Exa/...) — https://brave.com/learn/best-search-api-2026/
+- Ontology-driven Graph RAG for legal text — https://journals.sagepub.com/doi/10.3233/FAIA251598
+- Comparison of search APIs for AI agents (Tavily/Exa/...) — https://brave.com/learn/best-search-api-2026/

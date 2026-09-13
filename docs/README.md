@@ -1,17 +1,17 @@
-# Tài liệu định hướng phát triển
+# Roadmap documentation
 
-Thư mục này gom toàn bộ tài liệu **định hướng/roadmap** (chưa phải code đã triển khai) của dự án vào một chỗ, tách biệt với `REPORT.md` ở gốc repo (ghi lại refactor kiến trúc đã làm xong). Mọi tài liệu ở đây đều thiết kế theo đúng nguyên tắc module hoá đã có (`core/` định nghĩa interface → `providers/`/`tools/` cài đặt cụ thể → `services/` dùng qua interface → `api/app.py` là composition root) — tài liệu mới không phá vỡ nguyên tắc đó, chỉ đề xuất thêm interface/provider mới theo cùng khuôn mẫu.
+This folder gathers all of the project's **direction/roadmap** documentation (not yet implemented code) in one place, separate from the `REPORT.md` at the repo root (which records the architecture refactor already done). Every document here follows the module-first principle already in place (`core/` defines interfaces → `providers/`/`tools/` provide concrete implementations → `services/` consumes them through interfaces → `api/app.py` is the composition root) — the new docs don't break that principle, they only propose new interfaces/providers following the same pattern.
 
-## Danh sách tài liệu
+## Document list
 
-| Tài liệu | Nội dung |
+| Document | Content |
 |---|---|
-| [01-accuracy-and-cross-validation.md](01-accuracy-and-cross-validation.md) | Định hướng kiến trúc: tăng độ chính xác tối đa, cross-validation đa nguồn (FAISS + web search), giảm hallucination — interface mới, luồng xử lý mới, lộ trình theo giai đoạn |
-| [02-hallucination-mitigation-landscape.md](02-hallucination-mitigation-landscape.md) | Khảo sát các phương pháp/công cụ chống hallucination hiện có trên thị trường (RAG nói chung + đặc thù pháp lý), làm căn cứ cho tài liệu 01 |
-| [03-cloud-deployment-aws-gcp.md](03-cloud-deployment-aws-gcp.md) | Định hướng triển khai lên AWS hoặc GCP: so sánh 2 nền tảng theo từng lớp hạ tầng, khuyến nghị lộ trình cụ thể |
+| [01-accuracy-and-cross-validation.md](01-accuracy-and-cross-validation.md) | Architecture direction: maximizing accuracy, multi-source cross-validation (FAISS + web search), reducing hallucination — new interfaces, new processing flow, phased roadmap |
+| [02-hallucination-mitigation-landscape.md](02-hallucination-mitigation-landscape.md) | A survey of existing anti-hallucination methods/tools on the market (RAG in general + legal-domain specific), used as the basis for document 01 |
+| [03-cloud-deployment-aws-gcp.md](03-cloud-deployment-aws-gcp.md) | Deployment direction for AWS or GCP: comparing the two platforms layer by layer, with a concrete recommended path |
 
-## Cách đọc
+## How to read
 
-Đọc theo thứ tự 02 → 01 → 03 nếu muốn hiểu từ "thị trường đang làm gì" trước rồi mới tới "dự án này nên làm gì"; hoặc đọc thẳng 01/03 nếu chỉ cần bản tóm tắt định hướng và quyết định.
+Read in the order 02 → 01 → 03 if you want to understand "what the market is currently doing" first before getting to "what this project should do"; or jump straight to 01/03 if you just need a summary of the direction and decisions.
 
-Tất cả đề xuất trong 3 tài liệu đều ở dạng **roadmap — chưa implement**. Khi bắt tay triển khai mục nào, nên tách thành task/issue riêng và cập nhật lại tài liệu tương ứng (đánh dấu phần nào đã xong) thay vì để tài liệu định hướng lẫn với tài liệu mô tả hệ thống thật.
+All proposals in these 3 documents are **roadmap — not yet implemented**. When starting to implement any part, it should be split into a separate task/issue and the corresponding document updated (marking what's done) instead of mixing roadmap docs with docs describing the actual running system.

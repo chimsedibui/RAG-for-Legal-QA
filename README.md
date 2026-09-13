@@ -1,66 +1,66 @@
-# Báo cáo: Refactor kiến trúc `Rag_Legal_Assitant` để dễ mở rộng
+# Report: Refactoring `Rag_Legal_Assitant` for extensibility
 
-## 1. Tổng quan
+## 1. Overview
 
-`Rag_Legal_Assitant` là API chatbot hỏi-đáp pháp luật Việt Nam theo kiến trúc RAG (FastAPI + FAISS + LLM tương thích OpenAI), phát triển cho cuộc thi R2AI 2026 (xem `README.md`). Báo cáo này ghi lại:
+`Rag_Legal_Assitant` is a Vietnamese legal Q&A chatbot API built on a RAG architecture (FastAPI + FAISS + an OpenAI-compatible LLM), developed for the R2AI 2026 competition (see `README.md`). This report records:
 
-- Hiện trạng kiến trúc trước khi refactor và các vấn đề cụ thể phát hiện được.
-- Những gì đã thay đổi, vì sao, và cách kiểm chứng.
-- Cách mở rộng hệ thống theo kiến trúc mới (thêm LLM provider / vector store / tool).
-- Các vấn đề đã biết nhưng **cố tình để ngoài phạm vi** lần này.
+- The architecture's state before the refactor and the specific problems found.
+- What changed, why, and how it was verified.
+- How to extend the system under the new architecture (adding an LLM provider / vector store / tool).
+- Known issues **deliberately left out of scope** this time.
 
-## 2. Hiện trạng trước refactor
+## 2. State before the refactor
 
-Đọc toàn bộ mã nguồn (`api/`, `services/`, `pipeline/`) cho thấy hệ thống chạy đúng nhưng có 8 nhóm vấn đề cản trở mở rộng:
+Reading through the entire codebase (`api/`, `services/`, `pipeline/`) showed a working system with 8 groups of problems blocking extensibility:
 
-| # | Vấn đề | Hệ quả |
-|---|---|---|
-| A | Không có interface cho LLM / Embedding / Reranker / Vector store / Tool | Đổi provider (vd. sang Anthropic, Qdrant, thêm tool mới) bắt buộc sửa code lõi (`RAGPipeline.process()`) |
-| B | Config rải rác, `os.getenv` lặp lại ở 3 file | `.env.example` khai báo `RERANK_*` nhưng code đọc `RERANKER_*` → **reranker không bao giờ kích hoạt** dù cấu hình đúng theo tài liệu |
-| C | `ChatService`/`SearchService` là "God object" | 1 class gánh 3-5 trách nhiệm không liên quan (chat + embedding + rerank; FAISS + parse citation + 2 chiến lược search) |
-| D | Tool-calling hardcode bằng `if/else` | Thêm tool thứ 2 phải sửa vòng lặp orchestration trong `RAGPipeline` |
-| E | Prompt lẫn vào logic điều phối | 3 đoạn prompt tiếng Việt gần trùng nhau nằm rải rác trong `RAGPipeline.py` |
-| F | Hợp đồng dữ liệu giữa các module không có schema | Gây bug thật: event `answer/done` cuối luồng **thiếu key `sources`**, khiến response non-stream (`stream=false`) luôn trả `sources: []` |
-| G | `pipeline/` (crawl/chunk/embed offline) và `services/` là 2 thế giới tách biệt | Trùng lặp logic dựng OpenAI embedding client ở 2 nơi |
-| H | Không có test nào trong repo | Refactor không có lưới an toàn hồi quy |
+| # | Problem | Consequence |
+| - | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A | No interface for LLM / Embedding / Reranker / Vector store / Tool | Switching provider (e.g. to Anthropic, Qdrant, adding a new tool) forces changes to core code (`RAGPipeline.process()`) |
+| B | Scattered config, repeated `os.getenv` across 3 files | `.env.example` declares `RERANK_*` but the code reads `RERANKER_*` → **reranker never activates** even with correct config per the docs |
+| C | `ChatService`/`SearchService` are "God objects" | 1 class carries 3-5 unrelated responsibilities (chat + embedding + rerank; FAISS + citation parsing + 2 search strategies) |
+| D | Tool-calling hardcoded with `if/else` | Adding a 2nd tool requires editing the orchestration loop inside `RAGPipeline` |
+| E | Prompts mixed into orchestration logic | 3 near-duplicate Vietnamese prompt blocks scattered inside `RAGPipeline.py` |
+| F | No schema for the data contract between modules | Caused a real bug: the final `answer/done` event in the stream **was missing the `sources` key**, so the non-stream response (`stream=false`) always returned `sources: []` |
+| G | `pipeline/` (offline crawl/chunk/embed) and `services/` are 2 separate worlds | Duplicated logic for building the OpenAI embedding client in 2 places |
+| H | No tests anywhere in the repo | Refactoring had no regression safety net |
 
-Ngoài ra còn 1 giá trị mặc định không an toàn: `CHAT_BASE_URL` mặc định về một IP nội bộ (`http://10.9.3.241:30040/v1`) nếu bị bỏ trống trong `.env`.
+There was also 1 unsafe default value: `CHAT_BASE_URL` defaulted to an internal IP (`http://10.9.3.241:30040/v1`) whenever it was left blank in `.env`.
 
-## 3. Kiến trúc sau refactor
+## 3. Architecture after the refactor
 
 ```
-core/        → Protocol/interface + Settings tập trung + shared models + prompt text (không phụ thuộc gì bên dưới)
-providers/   → Cài đặt cụ thể của từng interface (OpenAI LLM/Embedding, vLLM Reranker, FAISS VectorStore)
-tools/       → ToolRegistry (dict-based) + tool hiện có (search_referenced_document)
-services/    → Logic nghiệp vụ thuần: search.py (retrieval) + rag_pipeline.py (orchestration) — chỉ phụ thuộc interface
-api/app.py   → Composition root: nơi DUY NHẤT dựng provider cụ thể và inject vào services
-pipeline/    → Script offline (crawl/chunk/embed), dùng lại OpenAIEmbeddingProvider thay vì tự dựng client riêng
-tests/       → pytest, chạy hoàn toàn offline bằng fake/in-memory implementation
+core/        → Protocols/interfaces + centralized Settings + shared models + prompt text (depends on nothing below it)
+providers/   → Concrete implementations of each interface (OpenAI LLM/Embedding, vLLM Reranker, FAISS VectorStore)
+tools/       → ToolRegistry (dict-based) + the existing tool (search_referenced_document)
+services/    → Pure business logic: search.py (retrieval) + rag_pipeline.py (orchestration) — depends only on interfaces
+api/app.py   → Composition root: the ONLY place that builds concrete providers and injects them into services
+pipeline/    → Offline scripts (crawl/chunk/embed), reuses OpenAIEmbeddingProvider instead of building its own client
+tests/       → pytest, runs fully offline using fake/in-memory implementations
 ```
 
-Nguyên tắc: `core` ← `providers`/`tools` ← `services` ← `api` — một chiều, không có cạnh ngược, nên không thể có import cycle.
+Principle: `core` ← `providers`/`tools` ← `services` ← `api` — one direction, no back edges, so an import cycle is impossible.
 
-### 3.1. Các interface mới (`core/interfaces.py`)
+### 3.1. New interfaces (`core/interfaces.py`)
 
-| Interface | Method chính | Cài đặt cụ thể |
-|---|---|---|
+| Interface | Main method | Concrete implementation |
+| --------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | `LLMProvider` | `chat(messages, tools=, response_format=, stream=)` | `providers/openai_llm.py::OpenAILLMProvider` |
 | `EmbeddingProvider` | `embed(text) -> list[float]` | `providers/openai_embedding.py::OpenAIEmbeddingProvider` |
 | `Reranker` | `rerank(query, documents) -> list[float]` | `providers/reranker.py::VLLMReranker` / `NullReranker` |
 | `VectorStore` | `search`, `search_subset`, `chunk_id_for`, `faiss_id_for`, `total` | `providers/faiss_store.py::FaissVectorStore` |
 | `Tool` | `name`, `schema`, `execute(args, question=)` | `tools/doc_ref_tool.py::SearchReferencedDocumentTool` |
 
-Dùng `typing.Protocol` (structural typing) thay vì abstract base class — bất kỳ class nào implement đúng method signature đều tự động thỏa interface, không cần kế thừa.
+Uses `typing.Protocol` (structural typing) instead of an abstract base class — any class implementing the right method signature automatically satisfies the interface, no inheritance needed.
 
-### 3.2. Tách "God object"
+### 3.2. Splitting up the "God objects"
 
-- `services/Chat.py` (chat + embedding + rerank) → tách thành 3 provider độc lập (`OpenAILLMProvider`, `OpenAIEmbeddingProvider`, `VLLMReranker`).
-- `services/Search.py` → tách thành `SemanticSearchService` (semantic search + rerank) và `DocRefSearchService` (tra cứu theo trích dẫn văn bản), cả hai chỉ phụ thuộc interface, không đụng trực tiếp `faiss`/SDK.
-- `services/RAGPipeline.py` → `services/rag_pipeline.py`, chỉ còn logic điều phối; prompt chuyển sang `core/prompts.py`, tool-dispatch chuyển sang `ToolRegistry`.
+- `services/Chat.py` (chat + embedding + rerank) → split into 3 independent providers (`OpenAILLMProvider`, `OpenAIEmbeddingProvider`, `VLLMReranker`).
+- `services/Search.py` → split into `SemanticSearchService` (semantic search + rerank) and `DocRefSearchService` (lookup by document citation), both depending only on interfaces, with no direct `faiss`/SDK access.
+- `services/RAGPipeline.py` → `services/rag_pipeline.py`, now holds only orchestration logic; prompts moved to `core/prompts.py`, tool dispatch moved to `ToolRegistry`.
 
-### 3.3. Config tập trung (`core/config.py`)
+### 3.3. Centralized config (`core/config.py`)
 
-Dùng `pydantic-settings`. `CHAT_*`/`EMBEDDING_*` (6 biến) **bắt buộc, không có giá trị mặc định** — thiếu biến nào, server báo lỗi rõ ràng ngay khi khởi động thay vì âm thầm dùng IP nội bộ cũ. Đã kiểm chứng thực tế:
+Uses `pydantic-settings`. `CHAT_*`/`EMBEDDING_*` (6 vars) are **required, with no default** — if any is missing, the server reports a clear error immediately at startup instead of silently falling back to the old internal IP. Verified in practice:
 
 ```
 $ python -c "from api.app import build_pipeline; build_pipeline()"
@@ -70,11 +70,11 @@ CHAT_API_KEY    Field required [type=missing]
 CHAT_MODEL_NAME Field required [type=missing]
 ```
 
-Các tham số vận hành khác (`MAX_CONTEXT_CHUNKS`, `MAX_TOOL_ITERATIONS`, `SEMANTIC_TOP_K`, `TOOL_SEARCH_TOP_K`, `RETRIEVAL_THRESHOLD`, `DATA_DIR`) đều có default = giá trị hardcode cũ, có thể override qua env mà không cần sửa code.
+Other operational parameters (`MAX_CONTEXT_CHUNKS`, `MAX_TOOL_ITERATIONS`, `SEMANTIC_TOP_K`, `TOOL_SEARCH_TOP_K`, `RETRIEVAL_THRESHOLD`, `DATA_DIR`) all default to the old hardcoded values and can be overridden via env without touching the code.
 
 ### 3.4. Tool registry (`tools/registry.py`)
 
-Thay `if tc["function"]["name"] != "search_referenced_document": ... else: ...` bằng:
+Replaces `if tc["function"]["name"] != "search_referenced_document": ... else: ...` with:
 
 ```python
 tool = self.tool_registry.get(tc["function"]["name"])
@@ -84,55 +84,69 @@ if tool is None:
 extra_docs = tool.execute(args, question=question)
 ```
 
-Thêm tool mới = viết 1 class implement `Tool` + đăng ký `tool_registry.register(...)` trong `api/app.py::build_pipeline()`. **Không cần sửa `rag_pipeline.py`.**
+Adding a new tool = write 1 class implementing `Tool` + register it with `tool_registry.register(...)` in `api/app.py::build_pipeline()`. **No need to touch `rag_pipeline.py`.**
 
-## 4. Bug đã sửa
+## 4. Bugs fixed
 
-| Bug | Trước | Sau |
-|---|---|---|
-| `RERANK_*` vs `RERANKER_*` | `.env.example` khai `RERANK_*`, code đọc `RERANKER_*` → rerank không bao giờ bật | `core/config.py` đọc đúng `RERANK_*`, khớp `.env.example`. Có test hồi quy (`test_reranker_stays_disabled_with_legacy_env_var_name`) đảm bảo tên biến cũ **không** vô tình kích hoạt lại |
-| IP nội bộ hardcode làm default | `CHAT_BASE_URL` mặc định `http://10.9.3.241:30040/v1` nếu bỏ trống | Không còn default — bắt buộc khai báo, fail fast nếu thiếu |
-| `sources` thiếu trong response non-stream | Event `answer/done` cuối cùng chỉ có `text`+`citations`, khiến `stream=false` luôn trả `sources: []` | Event `answer/done` nay có thêm `sources: context_docs` (đã có sẵn dữ liệu, chỉ là chưa được đưa vào) — có test hồi quy `test_answer_done_event_includes_sources` |
-| `/no_think` chưa thực sự chạy | README mô tả helper `_with_no_think()` nhưng **không tồn tại** trong code | Implement thật `core/prompts.py::with_no_think()`, gắn vào cả 2 lời gọi LLM (sub-query + answer), không mutate lịch sử hội thoại gốc — có test `test_with_no_think_applied_without_mutating_history` |
+| Bug | Before | After |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RERANK_*` vs `RERANKER_*` | `.env.example` declares `RERANK_*`, code reads `RERANKER_*` → rerank never turns on | `core/config.py` reads `RERANK_*` correctly, matching `.env.example`. Regression test (`test_reranker_stays_disabled_with_legacy_env_var_name`) ensures the old variable name **does not** accidentally re-enable it |
+| Hardcoded internal IP as default | `CHAT_BASE_URL` defaults to `http://10.9.3.241:30040/v1` when left blank | No more default — required to declare, fails fast if missing |
+| `sources` missing from non-stream response | The final `answer/done` event only had `text`+`citations`, so `stream=false` always returned `sources: []` | The `answer/done` event now also includes `sources: context_docs` (data already existed, just wasn't being included) — regression test `test_answer_done_event_includes_sources` |
+| `/no_think` wasn't actually running | README described a `_with_no_think()` helper that **did not exist** in the code | Actually implemented in `core/prompts.py::with_no_think()`, wired into both LLM calls (sub-query + answer), without mutating the original conversation history — test `test_with_no_think_applied_without_mutating_history` |
 
 ## 5. Test coverage
 
-47 test, chạy hoàn toàn **offline** (không cần tải FAISS index 3.2GB hay endpoint LLM thật):
+47 tests, running fully **offline** (no need to load the 3.2GB FAISS index or a real LLM endpoint):
 
 ```
-tests/test_config.py         — fail-fast khi thiếu env bắt buộc, reranker enable/disable, override tham số qua env
-tests/test_providers.py      — LLM/Embedding provider (mock OpenAI client), VLLMReranker (mock requests.post),
-                                FaissVectorStore (build 1 index FAISS thật nhỏ trong bộ nhớ — không cần tải gì)
-tests/test_tool_registry.py  — register/get/schemas(), map tham số tool → DocRefSearchService
-tests/test_search_service.py — threshold filter, rerank resort, parse trích dẫn tiếng Việt, doc_ref_search
-                                (exact match / fuzzy fallback / lọc điều-khoản)
-tests/test_rag_pipeline.py   — event `answer/done` có sources (regression), thứ tự event khi có tool-call,
-                                tool lạ không crash, with_no_think không mutate lịch sử, hết MAX_TOOL_ITERATIONS
-                                vẫn phát event kết thúc
+tests/test_config.py         — fail-fast on missing required env vars, reranker enable/disable, overriding params via env
+tests/test_providers.py      — LLM/Embedding provider (mocked OpenAI client), VLLMReranker (mocked requests.post),
+                                FaissVectorStore (builds a real small FAISS index in memory — no download needed)
+tests/test_tool_registry.py  — register/get/schemas(), mapping tool params → DocRefSearchService
+tests/test_search_service.py — threshold filter, rerank resort, parsing Vietnamese citations, doc_ref_search
+                                (exact match / fuzzy fallback / article-clause filtering)
+tests/test_rag_pipeline.py   — `answer/done` event includes sources (regression), event order when a tool call happens,
+                                an unknown tool doesn't crash, with_no_think doesn't mutate history, still emits
+                                a final event when MAX_TOOL_ITERATIONS is reached
 ```
 
-Kết quả: `47 passed` (`pytest tests/ -q`). Đã chạy thêm smoke-test thủ công: dựng `data/` giả (FAISS index nhỏ + JSON map), gọi `build_pipeline()` thành công, khởi động server thật (`uvicorn api.app:app`) và gọi `GET /health` (200 OK) + `POST /chat` (stream=false) — pipeline chạy đúng luồng (sub-query → retrieval → context_ready → tool_call → answer) và báo lỗi kết nối LLM một cách graceful vì không có LLM endpoint thật trong môi trường test.
+Result: `47 passed` (`pytest tests/ -q`). Also ran a manual smoke test: built a fake `data/` (small FAISS index + JSON maps), called `build_pipeline()` successfully, started a real server (`uvicorn api.app:app`) and called `GET /health` (200 OK) + `POST /chat` (stream=false) — the pipeline ran through the right flow (sub-query → retrieval → context_ready → tool_call → answer) and gracefully reported an LLM connection error since there was no real LLM endpoint in the test environment.
 
-## 6. Cách mở rộng (theo kiến trúc mới)
+## 6. How to extend (under the new architecture)
 
-- **Thêm LLM provider mới** (vd. gọi thẳng Anthropic SDK): tạo `providers/anthropic_llm.py` implement `LLMProvider.chat(...)`, đổi 1 dòng khởi tạo `llm = ...` trong `api/app.py::build_pipeline()`. Không đụng `rag_pipeline.py`.
-- **Thêm vector store khác** (Qdrant/Milvus/pgvector): tạo `providers/qdrant_store.py` implement `VectorStore`, đổi dòng khởi tạo `vector_store = ...`. `services/search.py` không cần sửa vì chỉ gọi qua interface.
-- **Thêm tool mới**: tạo class implement `Tool` (`core/interfaces.py`), đăng ký `tool_registry.register(YourTool(...))` trong composition root.
-- **Thêm tham số vận hành mới**: thêm field vào `core/config.py::RetrievalSettings` (hoặc settings tương ứng), không cần sửa logic ở nơi khác nếu đã inject `settings` vào.
+- **Add a new LLM provider** (e.g. calling the Anthropic SDK directly): create `providers/anthropic_llm.py` implementing `LLMProvider.chat(...)`, change 1 line initializing `llm = ...` in `api/app.py::build_pipeline()`. No need to touch `rag_pipeline.py`.
+- **Add a different vector store** (Qdrant/Milvus/pgvector): create `providers/qdrant_store.py` implementing `VectorStore`, change the `vector_store = ...` initialization line. `services/search.py` needs no changes since it only calls through the interface.
+- **Add a new tool**: create a class implementing `Tool` (`core/interfaces.py`), register it with `tool_registry.register(YourTool(...))` in the composition root.
+- **Add a new operational parameter**: add a field to `core/config.py::RetrievalSettings` (or the relevant settings class); no need to change logic elsewhere as long as `settings` is already injected there.
 
-## 7. Vấn đề đã biết, cố tình để ngoài phạm vi
+## 7. Known issues, deliberately out of scope
 
-Trong lúc viết test, phát hiện thêm 1 quirk có sẵn từ trước (không phải do refactor gây ra, giữ nguyên hành vi theo đúng phạm vi đã thống nhất — không "sửa ngầm" các bug ngoài 3 bug ở mục 4):
+While writing tests, 1 more pre-existing quirk was found (not caused by the refactor, behavior kept unchanged per the agreed scope — no "silently fixing" bugs outside the 3 bugs in section 4):
 
-- **`_extract_doc_num` (services/search.py)**: regex nhận diện số hiệu văn bản chỉ khớp phần chữ HOA ở nhóm cuối (`[A-ZĐƯƠ]+`). Với số hiệu có chữ thường ở cuối (vd. `QĐ-TTg`), phần chữ thường bị cắt mất (`QĐ-TT`). Việc match chunk vẫn đúng nhờ bước fallback fuzzy-match theo `doc_num`/`title` ngay sau đó, nhưng đây là điểm cần lưu ý nếu sau này mở rộng thêm định dạng số hiệu văn bản khác hoặc siết chặt match ở bước đầu.
-- **Filter theo threshold trước khi rerank** (`SemanticSearchService.semantic_search`): candidate bị loại theo điểm FAISS thô trước khi rerank, nên có thể loại nhầm candidate mà rerank lẽ ra sẽ chấm điểm cao — hành vi này giữ nguyên y hệt bản gốc, không nằm trong phạm vi 3 bug đã duyệt sửa lần này.
+- **`_extract_doc_num` (services/search.py)**: the regex identifying document numbers only matches the uppercase part in the final group (`[A-ZĐƯƠ]+`). For document numbers with lowercase letters at the end (e.g. `QĐ-TTg`), the lowercase part gets cut off (`QĐ-TT`). Chunk matching still works correctly thanks to the fuzzy-match fallback on `doc_num`/`title` right after, but this is worth noting if new document-number formats are added later or the first-pass match is tightened.
+- **Filtering by threshold before rerank** (`SemanticSearchService.semantic_search`): candidates are dropped based on the raw FAISS score before rerank, so a candidate that the reranker would have scored highly could be dropped by mistake — this behavior is kept identical to the original, and is not within the scope of the 3 approved bug fixes this time.
 
-Cả hai đều đã được ghi chú trực tiếp trong code/README để không bị quên khi có ai đó động vào khu vực này sau này.
+Both are noted directly in the code/README so they aren't forgotten if someone touches this area later.
 
-## 8. Thay đổi cần biết khi cập nhật lên bản refactor
+## 8. Changes to know about when updating to the refactored version
 
-- **Bắt buộc mới**: `CHAT_BASE_URL`, `CHAT_API_KEY`, `CHAT_MODEL_NAME`, `EMBEDDING_BASE_URL`, `EMBEDDING_API_KEY`, `EMBEDDING_MODEL_NAME` — ai đã có `.env` đầy đủ theo `.env.example` thì không bị ảnh hưởng.
-- **Không đổi**: biến `PORT`, cách chạy `python main.py`, định dạng/tên file trong `data/`, request shape của `/chat`.
-- **Đổi có chủ đích**: response `stream=false` giờ trả `sources` đầy đủ thay vì luôn rỗng; `/no_think` giờ thực sự được gửi lên LLM (trước đây tài liệu mô tả nhưng chưa chạy).
-- File cũ đã xóa: `services/Chat.py`, `services/Search.py`, `services/RAGPipeline.py`, `services/OpenAIExtended.py` — thay bằng các module trong `core/`, `providers/`, `services/search.py`, `services/rag_pipeline.py`.
-- Cài đặt: `pip install -r requirements.txt` (chạy API), thêm `-r requirements-pipeline.txt` nếu chạy `pipeline/`, thêm `-r requirements-dev.txt` nếu chạy test.
+- **New required vars**: `CHAT_BASE_URL`, `CHAT_API_KEY`, `CHAT_MODEL_NAME`, `EMBEDDING_BASE_URL`, `EMBEDDING_API_KEY`, `EMBEDDING_MODEL_NAME` — anyone who already has a complete `.env` per `.env.example` is unaffected.
+- **Unchanged**: the `PORT` variable, running via `python main.py`, file names/formats in `data/`, the `/chat` request shape.
+- **Intentional changes**: the `stream=false` response now returns full `sources` instead of always being empty; `/no_think` is now actually sent to the LLM (previously described in docs but never ran).
+- Old files removed: `services/Chat.py`, `services/Search.py`, `services/RAGPipeline.py`, `services/OpenAIExtended.py` — replaced by modules under `core/`, `providers/`, `services/search.py`, `services/rag_pipeline.py`.
+- Setup: `pip install -r requirements.txt` (to run the API), add `-r requirements-pipeline.txt` if running `pipeline/`, add `-r requirements-dev.txt` if running tests.
+- Or use [uv](https://docs.astral.sh/uv/): `uv sync` (installs test dependencies too); `uv run python main.py` to run the API, `uv run pytest` to run tests. See section 9.
+
+## 9. Using uv instead of pip/venv
+
+The project has a `pyproject.toml` declaring dependencies (kept in sync with `requirements.txt`), usable with [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv sync              # create .venv + install dependencies (including the dev group: pytest, pytest-mock)
+uv run python main.py   # run the API, equivalent to python main.py after activating the venv
+uv run pytest            # run tests
+uv add <package>         # add a new dependency, auto-updates pyproject.toml + uv.lock
+```
+
+`uv.lock` pins the exact resolved versions — commit this file so everyone installs the same set of dependencies.
