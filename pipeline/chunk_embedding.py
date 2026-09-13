@@ -27,7 +27,7 @@ from providers.openai_embedding import OpenAIEmbeddingProvider
 
 _settings = get_settings()
 
-EMBEDDING_DIM = 1024
+EMBEDDING_DIM = _settings.embedding.dimension
 EMBED_BATCH_SIZE = 5
 FLUSH_EVERY = 500
 
@@ -36,7 +36,7 @@ OVERLAP = 1000
 
 DATA_DIR = _settings.data.data_dir
 
-INPUT_FILE = "processed_data.json"
+INPUT_FILE = f"{DATA_DIR}/processed_data.json"
 CHUNKS_FILE = f"{DATA_DIR}/chunks.json"
 FAISS_INDEX_FILE = f"{DATA_DIR}/faiss.index"
 INDEXED_IDS_FILE = f"{DATA_DIR}/indexed_ids.json"
@@ -66,18 +66,18 @@ embedder = OpenAIEmbeddingProvider(
 # ─────────────────────────────────────────────────────────────
 
 def extract_dieu_so(article_full_title: str) -> str:
-    """Chỉ lấy phần 'Điều X' từ full title"""
+    """Extract just the 'Điều X' part from the full title"""
     match = re.match(r'(Điều\s+\d+)', article_full_title)
     return match.group(1) if match else ''
 
 
 def get_element_text_with_children(el):
-    """Lấy toàn bộ text của element bao gồm cả children"""
+    """Get the full text of an element, including children"""
     return el.get_text(separator=' ', strip=True)
 
 
 def flatten_metadata(nodes, parent_chain=None):
-    """Flatten tree structure sang flat dict"""
+    """Flatten a tree structure into a flat dict"""
     result = {}
     if parent_chain is None:
         parent_chain = []
@@ -112,8 +112,8 @@ def flatten_metadata(nodes, parent_chain=None):
 
 def parse_document(item) -> list:
     """
-    Parse 1 văn bản HTML thành chunks (Điều/Khoản/Điểm).
-    
+    Parse 1 HTML document into chunks (Article/Clause/Point).
+
     Return: list of {chunk_id, embed_text, metadata}
     """
     title = item['title']
@@ -140,7 +140,7 @@ def parse_document(item) -> list:
         if el_id and el_id in meta_map:
             id_to_el[el_id] = el
 
-    # Build map: article_id -> full title text (từ prov-article element)
+    # Build map: article_id -> full title text (from the prov-article element)
     node_full_title = {}
     for el in soup.find_all(['p', 'div'], id=True):
         el_id = el.get('id')
@@ -155,8 +155,8 @@ def parse_document(item) -> list:
         return None
 
     def get_content_for_leaf(leaf_id, node):
-        """Lấy nội dung text cho leaf node"""
-        # Trường hợp KHOẢN / ĐIỂM
+        """Get the text content for a leaf node"""
+        # Case: KHOẢN / ĐIỂM (Clause / Point)
         if node['level'] != 'Article' and leaf_id in id_to_el:
             el = id_to_el[leaf_id]
             full_text = get_element_text_with_children(el)
@@ -167,28 +167,28 @@ def parse_document(item) -> list:
                 content = full_text
             return content
 
-        # Trường hợp ĐIỀU không có Khoản
+        # Case: ĐIỀU (Article) with no Khoản (Clause)
         if leaf_id not in id_to_el:
             return ''
 
         article_el = id_to_el[leaf_id]
         content_parts = []
 
-        # Duyệt các sibling tiếp theo
+        # Walk through the following siblings
         for sibling in article_el.next_siblings:
             if not hasattr(sibling, 'get'):
                 continue
 
             sib_class = sibling.get('class', [])
 
-            # Gặp section tiếp theo → dừng
+            # Hit the next section → stop
             if any(c in sib_class for c in (
                 'prov-article', 'prov-chapter', 'prov-part',
                 'prov-section', 'prov-subsection'
             )):
                 break
 
-            # Lấy text từ content elements
+            # Get text from content elements
             if any(c in sib_class for c in ('prov-content', 'prov-clause', 'prov-item')):
                 text = get_element_text_with_children(sibling)
                 if text:
@@ -197,24 +197,24 @@ def parse_document(item) -> list:
         return ' '.join(content_parts)
 
     def create_leaf_chunk(leaf_id) -> Chunk:
-        """Tạo 1 chunk từ leaf node.
+        """Build 1 chunk from a leaf node.
 
-        Shape trả về (chunk_id/embed_text/metadata) khớp với core.models.Chunk
-        — schema này được services/search.py dùng lại khi đọc chunk_map.json.
+        The returned shape (chunk_id/embed_text/metadata) matches core.models.Chunk
+        — this schema is reused by services/search.py when reading chunk_map.json.
         """
         node = meta_map[leaf_id]
         article_id = get_article_ancestor_id(node)
 
-        # Full title của Điều
+        # Full title of the Điều (Article)
         art_full_title = node_full_title.get(article_id, '') if article_id else ''
         
         if node['level'] == 'Article':
             art_full_title = node_full_title.get(leaf_id, node['title'])
 
-        # Số điều
+        # Article number
         dieu_so = extract_dieu_so(art_full_title) if art_full_title else ''
 
-        # Nội dung text
+        # Text content
         own_content = get_content_for_leaf(leaf_id, node)
 
         SKIP_LEVELS = {'Part', 'Chapter'}
@@ -271,7 +271,7 @@ def parse_document(item) -> list:
 
 
 def phase3_chunk():
-    """Tách document thành chunks"""
+    """Split documents into chunks"""
     print("=" * 80)
     print("PHASE 3: CHUNKING (HTML → Chunks)")
     print("=" * 80)
@@ -282,7 +282,7 @@ def phase3_chunk():
         with open(INPUT_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
     except FileNotFoundError:
-        print(f"❌ File {INPUT_FILE} không tồn tại! Chạy phase 1+2 trước.")
+        print(f"File {INPUT_FILE} không tồn tại! Chạy phase 1+2 trước.")
         return []
     
     print(f"   Tổng docs: {len(data)}")
@@ -317,9 +317,9 @@ def phase3_chunk():
                 'error': str(e)
             })
     
-    print(f"   ✓ {len(all_chunks)} chunks từ {len(data)} docs")
+    print(f"   {len(all_chunks)} chunks từ {len(data)} docs")
     if skipped:
-        print(f"   ✗ {len(skipped)} docs skip")
+        print(f"   {len(skipped)} docs skip")
     
     # Build index maps
     print(f"\n3. Build index maps...")
@@ -349,30 +349,30 @@ def phase3_chunk():
     
     with open(CHUNKS_FILE, 'w', encoding='utf-8') as f:
         json.dump(all_chunks, f, ensure_ascii=False, indent=2)
-    print(f"   ✓ {CHUNKS_FILE} ({len(all_chunks)} chunks)")
+    print(f"   {CHUNKS_FILE} ({len(all_chunks)} chunks)")
     
     with open(FAISS_ID_MAP_FILE, 'w') as f:
         json.dump(faiss_id_map, f)
-    print(f"   ✓ {FAISS_ID_MAP_FILE}")
+    print(f"   {FAISS_ID_MAP_FILE}")
     
     with open(CHUNK_MAP_FILE, 'w',encoding='utf-8') as f:
         json.dump(chunk_map, f, ensure_ascii=False, indent=2)
-    print(f"   ✓ {CHUNK_MAP_FILE}")
+    print(f"   {CHUNK_MAP_FILE}")
     
     with open(DOC_INDEX_MAP_FILE, 'w') as f:
         json.dump(doc_index_map, f, ensure_ascii=False, indent=2)
-    print(f"   ✓ {DOC_INDEX_MAP_FILE}")
+    print(f"   {DOC_INDEX_MAP_FILE}")
     
     with open(ARTICLE_INDEX_MAP_FILE, 'w',encoding='utf-8') as f:
         json.dump(article_index_map, f, ensure_ascii=False, indent=2)
-    print(f"   ✓ {ARTICLE_INDEX_MAP_FILE}")
+    print(f"   {ARTICLE_INDEX_MAP_FILE}")
     
     if skipped:
         with open(f"{DATA_DIR}/skipped.json", 'w', encoding='utf-8') as f:
             json.dump(skipped, f, ensure_ascii=False, indent=2)
-        print(f"   ✓ skipped.json ({len(skipped)} errors)")
+        print(f"   skipped.json ({len(skipped)} errors)")
     
-    print(f"\n✅ Chunking hoàn tất!")
+    print(f"\nChunking hoàn tất!")
     return all_chunks
 
 
@@ -388,9 +388,9 @@ def normalize(vectors):
 
 
 def safe_embed(text):
-    """Embed 1 text qua EmbeddingProvider dùng chung với API runtime.
-    Trả về None nếu embed thất bại (vd text quá dài) để phase4_embedding bỏ
-    qua chunk này thay vì làm hỏng cả batch."""
+    """Embed 1 text via the EmbeddingProvider shared with the API runtime.
+    Returns None if embedding fails (e.g. text too long) so phase4_embedding
+    skips this chunk instead of breaking the whole batch."""
     vec = embedder.embed(text)
     if not vec:
         print("[skip] Embedding thất bại (có thể do text quá dài), skip chunk")
@@ -413,20 +413,22 @@ def phase4_embedding(all_chunks=None):
             with open(CHUNKS_FILE, "r", encoding="utf-8") as f:
                 all_chunks = json.load(f)
         except FileNotFoundError:
-            print(f"❌ File {CHUNKS_FILE} không tồn tại! Chạy phase 3 trước.")
+            print(f"File {CHUNKS_FILE} không tồn tại! Chạy phase 3 trước.")
             return
     
     print(f"   Tổng chunks: {len(all_chunks)}")
     
-    # Load hoặc tạo FAISS index
+    # Load or create the FAISS index
     print(f"\n2. Load/tạo FAISS index...")
     
     if os.path.exists(FAISS_INDEX_FILE):
         index = faiss.read_index(FAISS_INDEX_FILE)
-        print(f"   ✓ Resume index: {index.ntotal} vectors")
+        if index.d != EMBEDDING_DIM:
+            raise ValueError("Index dimension differs from EMBEDDING_DIM; use a new DATA_DIR to rebuild.")
+        print(f"   Resume index: {index.ntotal} vectors")
     else:
         index = faiss.IndexIDMap(faiss.IndexFlatIP(EMBEDDING_DIM))
-        print(f"   ✓ Tạo index mới")
+        print(f"   Tạo index mới")
     
     # Load indexed IDs
     if os.path.exists(INDEXED_IDS_FILE):
@@ -484,7 +486,7 @@ def phase4_embedding(all_chunks=None):
                 with open(INDEXED_IDS_FILE, "w") as f:
                     json.dump(sorted(indexed_ids), f)
                 
-                print(f"   💾 Saved: {index.ntotal} vectors (skip: {skipped_count})")
+                print(f"   Saved: {index.ntotal} vectors (skip: {skipped_count})")
                 flush_counter = 0
     
     # Final flush
@@ -499,7 +501,7 @@ def phase4_embedding(all_chunks=None):
     with open(INDEXED_IDS_FILE, "w") as f:
         json.dump(sorted(indexed_ids), f)
     
-    print(f"\n✅ Embedding hoàn tất!")
+    print(f"\nEmbedding hoàn tất!")
     print(f"   Total vectors: {index.ntotal}")
     print(f"   Skipped: {skipped_count}")
 
@@ -512,12 +514,12 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) > 1 and sys.argv[1] == "phase4":
-        # Chỉ embedding
+        # Embedding only
         phase4_embedding()
     elif len(sys.argv) > 1 and sys.argv[1] == "phase3":
-        # Chỉ chunking
+        # Chunking only
         phase3_chunk()
     else:
-        # Cả 2 phase
+        # Both phases
         chunks = phase3_chunk()
         phase4_embedding(chunks)
