@@ -1,0 +1,11 @@
+.git
+.agents
+.codex
+.venv
+**/__pycache__
+.pytest_cache
+.env
+.env.*
+data
+*.zip
+processed_data.json

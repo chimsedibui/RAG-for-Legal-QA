@@ -1,0 +1,23 @@
+services:
+  api:
+    build: .
+    env_file: .env
+    environment:
+      PORT: "8000"
+      DATA_DIR: /app/data
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - type: bind
+        source: ${DATA_DIR:-./data}
+        target: /app/data
+        read_only: true
+        bind:
+          create_host_path: false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
